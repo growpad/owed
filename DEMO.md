@@ -16,7 +16,7 @@
    - Noise: "Thanks for lunch yesterday, great to catch up."
    - Spare deposit-style ask, for the real take.
 2. Do not reply. Wait 20 minutes (`STALL_AFTER=20 minutes`).
-3. Mail budget: AgentMail free plan is 10 emails. `SEND_BUDGET=4` caps Owed's sends. Plan: 1 dry run, 1 real take, 2 spare. Redrafting is free.
+3. Safety cap: `SEND_BUDGET=20` limits how many emails Owed can send. One Send per take is all the video needs; redrafting is free.
 4. Put the 3 counterpart addresses in `SEND_ALLOWLIST`.
 
 ## Video script (target 2:30, cap 3:00)
