@@ -1,12 +1,12 @@
-// In-memory Gmail, LLM and Postgres (PGlite) for tests and OWED_FAKE=1 UI work.
-// Fake mode is for building the UI while Google OAuth is being set up.
-// Never record the submission video in fake mode: the UI shows a FAKE MODE banner.
+// Test doubles: in-memory mailbox, scripted LLM and Postgres (PGlite) running the real schema.
+// Test-only. The app itself always runs on real mail, the real model and Neon.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
-import type { Classification, DraftInput, GmailPort, LlmPort, RawMessage, RawThread, Sql } from "./types";
+import { MailError } from "@/lib/mail";
+import type { Classification, DraftInput, DraftReply, MailPort, LlmPort, RawMessage, RawThread, Sql } from "@/lib/types";
 
-export const ME = "owed.demo@gmail.com";
+export const ME = "test.user@example.com";
 
 export async function makePgliteSql(): Promise<Sql> {
   const db = new PGlite();
@@ -17,7 +17,7 @@ export async function makePgliteSql(): Promise<Sql> {
 let counter = 0;
 const nextId = (p: string) => `${p}${++counter}`;
 
-export class FakeGmail implements GmailPort {
+export class TestMailbox implements MailPort {
   threads = new Map<string, RawMessage[]>();
   drafts = new Map<string, { threadId: string; messageId: string }>();
 
@@ -40,49 +40,54 @@ export class FakeGmail implements GmailPort {
 
   addOutgoing(threadId: string, to: string, subject: string, text: string, at: number) {
     const list = this.threads.get(threadId) ?? [];
-    list.push(this.msg(["SENT"], { from: `Owed Demo <${ME}>`, to, subject }, text, at));
+    list.push(this.msg(["SENT"], { from: `Test User <${ME}>`, to, subject }, text, at));
     this.threads.set(threadId, list);
   }
 
-  /** Simulate the other person replying (tests and fake-mode demo button). */
-  reply(threadId: string, text: string) {
+  /** The other person replies in the thread, a moment after now (real replies never share our send's millisecond). */
+  reply(threadId: string, text: string, at = Date.now() + 1000) {
     const list = this.threads.get(threadId);
     if (!list) throw new Error("no thread");
     const first = list[0];
-    list.push(this.msg(["INBOX"], { from: first.headers["to"], to: ME, subject: `Re: ${first.headers["subject"]}` }, text, Date.now()));
+    list.push(this.msg(["INBOX"], { from: first.headers["to"], to: ME, subject: `Re: ${first.headers["subject"]}` }, text, at));
   }
 
   private msg(labelIds: string[], h: { from: string; to: string; subject: string }, text: string, at: number): RawMessage {
     const id = nextId("m");
-    return { id, labelIds, internalDate: at, headers: { ...h, "message-id": `<${id}@fake.mail>` }, text };
+    return { id, labelIds, internalDate: at, headers: { ...h, "message-id": `<${id}@test.mail>` }, text };
   }
 
-  async myAddress() { return ME; }
-  async listSentThreadIds(max: number) { return [...this.threads.keys()].slice(0, max); }
+  async myAddresses() { return [ME]; }
+  async listThreadIds(max: number) { return [...this.threads.keys()].slice(0, max); }
   async getThread(id: string): Promise<RawThread> {
     return { id, messages: structuredClone(this.threads.get(id) ?? []) };
   }
-  async createDraft(threadId: string, raw: string) {
-    const decoded = Buffer.from(raw, "base64url").toString("utf8");
-    const [head, ...body] = decoded.split("\r\n\r\n");
-    const headers: Record<string, string> = {};
-    for (const line of head.split("\r\n")) {
-      const i = line.indexOf(":");
-      headers[line.slice(0, i).toLowerCase()] = line.slice(i + 1).trim();
-    }
-    const m = this.msg(["DRAFT"], { from: headers.from, to: headers.to, subject: headers.subject }, body.join("\r\n\r\n").trim(), Date.now());
-    m.headers = { ...headers, "message-id": m.headers["message-id"] };
+  async createDraft({ threadId, to, subject, inReplyTo, body }: DraftReply) {
+    const m = this.msg(["DRAFT"], { from: ME, to, subject: /^re:/i.test(subject) ? subject : `Re: ${subject}` }, body, Date.now());
+    m.headers["in-reply-to"] = inReplyTo;
     this.threads.get(threadId)!.push(m);
     const draftId = nextId("d");
     this.drafts.set(draftId, { threadId, messageId: m.id });
     return draftId;
   }
+  async updateDraft(draftId: string, { body }: DraftReply) {
+    const d = this.drafts.get(draftId);
+    if (!d) throw new MailError(404, "draft not found"); // like Gmail and AgentMail
+    this.threads.get(d.threadId)!.find((m) => m.id === d.messageId)!.text = body;
+  }
+  async deleteDraft(draftId: string) {
+    const d = this.drafts.get(draftId);
+    if (!d) throw new MailError(404, "draft not found"); // like Gmail and AgentMail
+    const list = this.threads.get(d.threadId)!;
+    list.splice(list.findIndex((m) => m.id === d.messageId), 1);
+    this.drafts.delete(draftId);
+  }
   async sendDraft(draftId: string) {
     const d = this.drafts.get(draftId);
-    if (!d) throw new Error("draft not found");
+    if (!d) throw new MailError(404, "draft not found"); // like Gmail and AgentMail
     const list = this.threads.get(d.threadId)!;
     const i = list.findIndex((m) => m.id === d.messageId);
-    // Gmail deletes the draft and creates a new SENT message with a new id.
+    // Like Gmail and AgentMail: sending deletes the draft and creates a new SENT message with a new id.
     const sent = { ...list[i], id: nextId("m"), labelIds: ["SENT"], internalDate: Date.now() };
     list.splice(i, 1, sent);
     this.drafts.delete(draftId);
@@ -90,7 +95,7 @@ export class FakeGmail implements GmailPort {
   }
 }
 
-export const fakeLlm: LlmPort = {
+export const scriptedLlm: LlmPort = {
   async classify(text): Promise<Classification> {
     const amount = text.match(/\$([\d,]+)/);
     const owed = /\?/.test(text) && !/thanks for lunch/i.test(text);
@@ -103,6 +108,6 @@ export const fakeLlm: LlmPort = {
   },
   async draft(input: DraftInput) {
     const firstName = input.counterpartName.split(/[\s<@]/)[0] || "there";
-    return `Hi ${firstName}, following up on "${input.subject}". [fake LLM draft: ${input.whatOwed ?? "item"}] Could you confirm by Friday?`;
+    return `Hi ${firstName}, following up on "${input.subject}". [test draft: ${input.whatOwed ?? "item"}] Could you confirm by Friday?`;
   },
 };

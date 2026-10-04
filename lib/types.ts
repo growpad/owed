@@ -1,5 +1,5 @@
 // Shared shapes. The core logic in lib/owed.ts only depends on these
-// interfaces, so tests and fake mode swap in in-memory versions.
+// interfaces, so tests swap in in-memory versions.
 
 export type Sql = (text: string, params?: unknown[]) => Promise<Record<string, any>[]>;
 
@@ -13,12 +13,17 @@ export type RawMessage = {
 
 export type RawThread = { id: string; messages: RawMessage[] };
 
-export interface GmailPort {
-  myAddress(): Promise<string>;
-  listSentThreadIds(max: number): Promise<string[]>;
+export type DraftReply = { threadId: string; to: string; subject: string; inReplyTo: string; body: string };
+
+/** Gmail (reads your sent mail) or AgentMail (Owed's own inbox that you CC). */
+export interface MailPort {
+  myAddresses(): Promise<string[]>; // "our side" of a thread: you, and Owed's inbox if it has one
+  listThreadIds(max: number): Promise<string[]>;
   getThread(id: string): Promise<RawThread>;
-  createDraft(threadId: string, raw: string): Promise<string>; // returns draft id
-  sendDraft(draftId: string): Promise<string>; // returns the new SENT message id
+  createDraft(d: DraftReply): Promise<string>; // returns draft id
+  sendDraft(draftId: string): Promise<string>; // returns the new sent message id
+  updateDraft(draftId: string, d: DraftReply): Promise<void>;
+  deleteDraft(draftId: string): Promise<void>;
 }
 
 export type Classification = {
@@ -30,6 +35,7 @@ export type Classification = {
 
 export type DraftInput = {
   myName: string;
+  assistant: boolean; // true: Owed writes as itself, on the user's behalf
   subject: string;
   counterpartName: string;
   bodyTail: string;
@@ -45,9 +51,10 @@ export interface LlmPort {
 
 export type Deps = {
   sql: Sql;
-  gmail: GmailPort;
+  mail: MailPort;
   llm: LlmPort;
   myName: string;
+  assistant: boolean;
   stallAfter: string; // Postgres interval, e.g. '5 days' or '20 minutes'
 };
 
@@ -63,9 +70,11 @@ export type BoardRow = {
   state: string;
   last_msg_at: string;
   last_text: string | null;
+  last_their_text: string | null;
   last_from_me: boolean;
   is_stalled: boolean;
   follow_up_id: string | null;
   follow_up_body: string | null;
+  follow_up_status: "draft" | "sending" | "sent" | null;
   receipt: string | null;
 };
