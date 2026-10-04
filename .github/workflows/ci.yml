@@ -6,12 +6,20 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
+      # Next.js build cache: https://nextjs.org/docs/app/guides/ci-build-caching
+      - uses: actions/cache@v6
+        with:
+          path: .next/cache
+          key: nextjs-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('app/**', 'components/**', 'lib/**', 'middleware.ts') }}
+          restore-keys: nextjs-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
