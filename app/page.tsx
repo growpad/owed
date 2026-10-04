@@ -15,16 +15,18 @@ import { api, BoardContext, useBoard, type Board } from "@/components/board-cont
 const POLL_MS = 10_000;
 
 /** Deterministic router: no LLM tool-calling needed for the chat itself. */
-const adapter: ChatModelAdapter = {
+const makeAdapter = (refresh: () => Promise<void>): ChatModelAdapter => ({
   async run({ messages }) {
     const last = messages[messages.length - 1];
     const text = last.content.map((p) => (p.type === "text" ? p.text : "")).join(" ");
     if (/sync|scan|refresh|check (my )?mail/i.test(text)) {
       const r = await api<{ threads: number; classified: number; owed: number }>("/api/sync", {});
+      await refresh();
       return { content: [{ type: "text", text: `Scanned ${r.threads} sent threads. ${r.owed} new things you're owed. Ask "What am I owed?" to see them.` }] };
     }
     if (/ow(e|ed|ing)|waiting|open loops|what.*due/i.test(text)) {
       const b = await api<Board>("/api/board");
+      await refresh(); // the cards render from the shared board, not from `b`
       const quiet = b.loops.filter((l) => l.is_stalled).length;
       return {
         content: [
@@ -35,7 +37,7 @@ const adapter: ChatModelAdapter = {
     }
     return { content: [{ type: "text", text: 'Try "What am I owed?" or "Sync my inbox".' }] };
   },
-};
+});
 
 function BoardToolUI() {
   const { board } = useBoard();
@@ -63,7 +65,6 @@ const AssistantMessage = () => (
 );
 
 export default function Page() {
-  const runtime = useLocalRuntime(adapter);
   const [board, setBoard] = useState<Board | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -75,6 +76,7 @@ export default function Page() {
       setError(e instanceof Error ? e.message : String(e));
     }
   }, []);
+  const runtime = useLocalRuntime(useMemo(() => makeAdapter(refresh), [refresh]));
 
   // F8: the browser drives polling (serverless has no background loop).
   useEffect(() => {
@@ -115,7 +117,14 @@ export default function Page() {
             <ThreadPrimitive.Viewport className="viewport">
               <ThreadPrimitive.Empty>
                 <div className="empty">
-                  <p>Ask what you're owed. Owed reads your sent mail, finds where you spoke last and got silence, and drafts the nudge. Nothing sends without your click.</p>
+                  {board?.ccAddress ? (
+                    <p>
+                      CC <strong>{board.ccAddress}</strong> on anything you're waiting on. Owed never reads your inbox. When they go quiet,
+                      it drafts the nudge and sends it for you, with you in CC. Nothing sends without your click.
+                    </p>
+                  ) : (
+                    <p>Ask what you're owed. Owed reads your sent mail, finds where you spoke last and got silence, and drafts the nudge. Nothing sends without your click.</p>
+                  )}
                   <div className="chips">
                     <button onClick={() => runtime.thread.append("What am I owed?")}>What am I owed?</button>
                     <button onClick={() => runtime.thread.append("Sync my inbox")}>Sync my inbox</button>
@@ -129,7 +138,7 @@ export default function Page() {
               <ComposerPrimitive.Send className="send">Ask</ComposerPrimitive.Send>
             </ComposerPrimitive.Root>
           </ThreadPrimitive.Root>
-          <footer className="foot">Neon Postgres + AI Gateway · assistant-ui · Gmail drafts, sent only on click</footer>
+          <footer className="foot">Neon Postgres + AI Gateway · assistant-ui · AgentMail · sent only on click</footer>
         </main>
       </AssistantRuntimeProvider>
     </BoardContext.Provider>

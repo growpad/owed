@@ -37,7 +37,7 @@ create table if not exists follow_ups (
 create table if not exists events (
   id         bigserial primary key,
   loop_id    uuid references loops(id) on delete cascade,
-  type       text not null,                   -- classified|drafted|sent|reply_received
+  type       text not null,                   -- classified|flagged|drafted|sent|reply_received|resolved
   payload    jsonb not null default '{}',
   created_at timestamptz not null default now()
 );

@@ -1,7 +1,8 @@
 // Real Gmail adapter. One demo account: the refresh token comes from env
 // (get it once with `npm run token`). Scopes: gmail.readonly + gmail.compose.
 import { gmail as gmailApi, auth as gauth } from "@googleapis/gmail";
-import type { GmailPort, RawMessage, RawThread } from "./types";
+import { buildReply } from "./mail";
+import type { MailPort, RawMessage, RawThread } from "./types";
 
 type Part = { mimeType?: string | null; body?: { data?: string | null } | null; parts?: Part[] | null };
 
@@ -29,18 +30,18 @@ export function stripQuoted(text: string): string {
   return out.join("\n").trim();
 }
 
-export function realGmail(env: { clientId: string; clientSecret: string; refreshToken: string }): GmailPort {
+export function realGmail(env: { clientId: string; clientSecret: string; refreshToken: string }): MailPort {
   const oauth = new gauth.OAuth2(env.clientId, env.clientSecret);
   oauth.setCredentials({ refresh_token: env.refreshToken });
   const api = gmailApi({ version: "v1", auth: oauth });
   let me: string | null = null;
 
   return {
-    async myAddress() {
+    async myAddresses() {
       if (!me) me = (await api.users.getProfile({ userId: "me" })).data.emailAddress!.toLowerCase();
-      return me;
+      return [me];
     },
-    async listSentThreadIds(max) {
+    async listThreadIds(max) {
       const res = await api.users.threads.list({ userId: "me", q: "in:sent newer_than:30d", maxResults: max });
       return (res.data.threads ?? []).map((t) => t.id!).filter(Boolean);
     },
@@ -59,7 +60,9 @@ export function realGmail(env: { clientId: string; clientSecret: string; refresh
       });
       return { id, messages };
     },
-    async createDraft(threadId, raw) {
+    async createDraft({ threadId, ...reply }) {
+      const [from] = await this.myAddresses();
+      const raw = buildReply({ from, ...reply });
       const res = await api.users.drafts.create({ userId: "me", requestBody: { message: { raw, threadId } } });
       return res.data.id!;
     },

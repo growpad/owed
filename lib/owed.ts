@@ -1,6 +1,6 @@
 // Core flow: sync -> board -> draft -> send -> poll. No framework code here,
 // so the same functions run in API routes, tests and fake mode.
-import { buildReply, summarizeThread, type ThreadSummary } from "./mail";
+import { summarizeThread, type ThreadSummary } from "./mail";
 import type { BoardRow, Deps } from "./types";
 
 const MAX_THREADS = 20;
@@ -19,15 +19,16 @@ async function upsertThread(deps: Deps, s: ThreadSummary) {
 
 /** F2 + F3: read recent sent threads, store them, classify new ones once. */
 export async function sync(deps: Deps) {
-  const me = await deps.gmail.myAddress();
-  const ids = await deps.gmail.listSentThreadIds(MAX_THREADS);
+  const me = await deps.mail.myAddresses();
+  const ids = await deps.mail.listThreadIds(MAX_THREADS);
   let classified = 0;
   let owed = 0;
   await Promise.all(
     ids.map(async (id) => {
-      const s = summarizeThread(await deps.gmail.getThread(id), me);
+      const s = summarizeThread(await deps.mail.getThread(id), me);
       if (!s) return;
       await upsertThread(deps, s);
+      if (!s.lastFromMe) return; // they spoke last: nothing owed (yet); a later sync picks it up
       const existing = await deps.sql(`select id from loops where thread_id = $1`, [id]);
       if (existing.length > 0) return;
       const c = await deps.llm.classify(`Subject: ${s.subject}\n\n${s.bodyTail}`);
@@ -58,8 +59,7 @@ export async function board(deps: Deps): Promise<BoardRow[]> {
        select * from follow_ups f where f.loop_id = l.id and f.status in ('draft','sent')
        order by f.created_at desc limit 1) f on true
      where l.state not in ('dismissed','resolved')
-     order by (l.state in ('open','drafted') and t.last_from_me and t.last_msg_at < now() - $1::interval) desc,
-              l.stakes_usd desc nulls last, t.last_msg_at asc
+     order by l.stakes_usd desc nulls last, t.last_msg_at asc
      limit 10`,
     [deps.stallAfter],
   )) as BoardRow[];
@@ -83,12 +83,15 @@ export async function events(deps: Deps, loopId: string) {
 export async function draft(deps: Deps, loopId: string) {
   const loop = await loadLoop(deps, loopId);
   if (!["open", "drafted"].includes(loop.state)) throw new HttpError(409, `cannot draft in state ${loop.state}`);
+  const allow = (process.env.SEND_ALLOWLIST ?? "").split(",").map((a) => a.trim().toLowerCase()).filter(Boolean);
+  if (allow.length && !allow.includes(loop.counterpart)) throw new HttpError(403, `${loop.counterpart} is not in SEND_ALLOWLIST`);
   const prior = (await deps.sql(
     `select type, payload, created_at from events where loop_id = $1 order by created_at desc, id desc limit 10`,
     [loopId],
   )) as { type: string; payload: unknown; created_at: string }[];
   const body = await deps.llm.draft({
     myName: deps.myName,
+    assistant: deps.assistant,
     subject: loop.subject,
     counterpartName: loop.counterpart_name ?? loop.counterpart,
     bodyTail: loop.body_tail ?? "",
@@ -96,9 +99,9 @@ export async function draft(deps: Deps, loopId: string) {
     openQuestion: loop.open_question,
     priorEvents: prior,
   });
-  const me = await deps.gmail.myAddress();
-  const raw = buildReply({ from: me, to: loop.counterpart, subject: loop.subject, inReplyTo: loop.last_msg_id, body });
-  const draftId = await deps.gmail.createDraft(loop.thread_id, raw);
+  const draftId = await deps.mail.createDraft({
+    threadId: loop.thread_id, to: loop.counterpart, subject: loop.subject, inReplyTo: loop.last_msg_id, body,
+  });
   const rows = await deps.sql(
     `with old as (update follow_ups set status = 'discarded' where loop_id = $1 and status = 'draft'),
           f as (insert into follow_ups (loop_id, body, gmail_draft_id) values ($1,$2,$3) returning id, loop_id),
@@ -117,7 +120,10 @@ export async function send(deps: Deps, followUpId: string) {
   if (rows.length === 0) throw new HttpError(404, "follow-up not found");
   const f = rows[0];
   if (f.status !== "draft" || !f.gmail_draft_id) throw new HttpError(409, `follow-up is ${f.status}`);
-  const messageId = await deps.gmail.sendDraft(f.gmail_draft_id);
+  const budget = Number(process.env.SEND_BUDGET);
+  const [{ n }] = await deps.sql(`select count(*)::int as n from follow_ups where status = 'sent'`);
+  if (budget > 0 && n >= budget) throw new HttpError(429, `send budget used: ${n}/${budget} (SEND_BUDGET)`);
+  const messageId = await deps.mail.sendDraft(f.gmail_draft_id);
   await deps.sql(
     `with f as (update follow_ups set status = 'sent', sent_at = now(), gmail_message_id = $2 where id = $1 returning loop_id),
           l as (update loops set state = 'sent', updated_at = now() where id = (select loop_id from f)),
@@ -130,13 +136,13 @@ export async function send(deps: Deps, followUpId: string) {
   return { messageId };
 }
 
-/** F8: re-read threads we are waiting on; if they replied, flip the loop. */
+/** F8: re-read every thread we are waiting on; if they replied (before or after a nudge), flip the loop. */
 export async function poll(deps: Deps) {
-  const me = await deps.gmail.myAddress();
-  const waiting = await deps.sql(`select thread_id from loops where state = 'sent'`);
+  const me = await deps.mail.myAddresses();
+  const waiting = await deps.sql(`select thread_id from loops where state in ('open','drafted','sent')`);
   await Promise.all(
     waiting.map(async (w) => {
-      const s = summarizeThread(await deps.gmail.getThread(w.thread_id), me);
+      const s = summarizeThread(await deps.mail.getThread(w.thread_id), me);
       if (s) await upsertThread(deps, s);
     }),
   );
@@ -144,11 +150,21 @@ export async function poll(deps: Deps) {
     `with r as (
        update loops l set state = 'replied', updated_at = now()
        from threads t
-       where t.id = l.thread_id and not t.last_from_me and l.state = 'sent'
+       where t.id = l.thread_id and not t.last_from_me and l.state in ('open','drafted','sent')
        returning l.id, t.last_text)
      insert into events (loop_id, type, payload)
      select id, 'reply_received', jsonb_build_object('text', last_text) from r
      returning loop_id`,
+  );
+  // F9: log the moment a loop goes quiet, once per silence (a new message from us starts a new one).
+  await deps.sql(
+    `insert into events (loop_id, type, payload)
+     select l.id, 'flagged', jsonb_build_object('silent_since', t.last_msg_at)
+     from loops l join threads t on t.id = l.thread_id
+     where l.state in ('open','drafted','sent') and t.last_from_me and t.last_msg_at < now() - $1::interval
+       and not exists (select 1 from events e where e.loop_id = l.id and e.type = 'flagged'
+                       and (e.payload->>'silent_since')::timestamptz = t.last_msg_at)`,
+    [deps.stallAfter],
   );
   return { checked: waiting.length, replied: replied.map((r) => r.loop_id as string) };
 }

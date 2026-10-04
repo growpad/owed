@@ -11,7 +11,7 @@ let gmail: FakeGmail;
 
 beforeEach(async () => {
   gmail = new FakeGmail(); // seeds sent 3 hours ago
-  deps = { sql: await makePgliteSql(), gmail, llm: fakeLlm, myName: "Owed Demo", stallAfter: "20 minutes" };
+  deps = { sql: await makePgliteSql(), mail: gmail, llm: fakeLlm, myName: "Owed Demo", assistant: false, stallAfter: "20 minutes" };
 });
 
 const byThread = async (id: string) => (await board(deps)).find((l) => l.thread_id === id)!;
@@ -84,7 +84,7 @@ describe("Owed end-to-end", () => {
 
     // Memory: every step is an event, newest first
     const ev = (await events(deps, deposit.id)).map((e) => e.type);
-    expect(ev).toEqual(["reply_received", "sent", "drafted", "classified"]);
+    expect(ev).toEqual(["reply_received", "sent", "flagged", "drafted", "classified"]);
 
     // Resolve removes it from the board
     await setState(deps, deposit.id, "resolved");
@@ -100,6 +100,41 @@ describe("Owed end-to-end", () => {
     expect(rows.map((r) => r.status)).toEqual(["discarded", "draft"]);
     expect(rows[1].id).toBe(second.followUpId);
     await expect(send(deps, first.followUpId)).rejects.toThrow(/discarded/);
+  });
+
+  it("threads where they already replied are not classified", async () => {
+    gmail.reply("t-thanks", "Anytime!");
+    const r = await sync(deps);
+    expect(r).toEqual({ threads: 4, classified: 3, owed: 3 });
+  });
+
+  it("a reply before any nudge still flips the card", async () => {
+    await sync(deps);
+    gmail.reply("t-refund", "Refund issued this morning.");
+    const p = await poll(deps);
+    expect(p.replied).toEqual([(await byThread("t-refund")).id]);
+    expect((await byThread("t-refund")).state).toBe("replied");
+  });
+
+  it("flagged is logged once per silence", async () => {
+    await sync(deps);
+    await poll(deps);
+    await poll(deps);
+    const rows = await deps.sql(`select count(*)::int as n from events where type = 'flagged'`);
+    expect(rows[0].n).toBe(3);
+  });
+
+  it("SEND_BUDGET stops sends once used", async () => {
+    await sync(deps);
+    process.env.SEND_BUDGET = "1";
+    try {
+      const a = await draft(deps, (await byThread("t-pilot")).id);
+      await send(deps, a.followUpId);
+      const b = await draft(deps, (await byThread("t-refund")).id);
+      await expect(send(deps, b.followUpId)).rejects.toThrow(/budget/);
+    } finally {
+      delete process.env.SEND_BUDGET;
+    }
   });
 
   it("drafting a replied loop is refused", async () => {
@@ -138,12 +173,27 @@ describe("helpers", () => {
           { id: "2", labelIds: ["DRAFT"], internalDate: 2000, headers: { from: ME, to: "sam@x.com", subject: "Re: Hi" }, text: "draft" },
         ],
       },
-      ME,
+      [ME],
     )!;
     expect(s.lastMsgId).toBe("<1>");
     expect(s.lastFromMe).toBe(true);
     expect(s.counterpart).toBe("sam@x.com");
     expect(s.counterpartName).toBe("Sam");
+  });
+
+  it("CC model: Owed's inbox and the owner are both our side", () => {
+    const OWED = "owed@agentmail.to", JD = "jd@x.com";
+    const m = (id: string, at: number, from: string, to: string, cc = "") =>
+      ({ id, labelIds: [], internalDate: at, headers: { from, to, cc, subject: "Deposit", "message-id": id }, text: id });
+    const ask = m("ask", 1, `JD <${JD}>`, "Sam <sam@x.com>", OWED);
+    const nudge = m("nudge", 2, OWED, "sam@x.com", JD);
+    const reply = m("reply", 3, "Sam <sam@x.com>", OWED, JD);
+    const s1 = summarizeThread({ id: "t", messages: [ask] }, [OWED, JD])!;
+    expect([s1.lastFromMe, s1.counterpart, s1.counterpartName]).toEqual([true, "sam@x.com", "Sam"]);
+    const s2 = summarizeThread({ id: "t", messages: [ask, nudge] }, [OWED, JD])!;
+    expect([s2.lastFromMe, s2.counterpart]).toEqual([true, "sam@x.com"]);
+    const s3 = summarizeThread({ id: "t", messages: [ask, nudge, reply] }, [OWED, JD])!;
+    expect([s3.lastFromMe, s3.counterpart]).toEqual([false, "sam@x.com"]);
   });
 
   it("parses classifier JSON wrapped in prose or fences", () => {

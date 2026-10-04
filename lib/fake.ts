@@ -4,7 +4,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
-import type { Classification, DraftInput, GmailPort, LlmPort, RawMessage, RawThread, Sql } from "./types";
+import type { Classification, DraftInput, DraftReply, MailPort, LlmPort, RawMessage, RawThread, Sql } from "./types";
 
 export const ME = "owed.demo@gmail.com";
 
@@ -17,7 +17,7 @@ export async function makePgliteSql(): Promise<Sql> {
 let counter = 0;
 const nextId = (p: string) => `${p}${++counter}`;
 
-export class FakeGmail implements GmailPort {
+export class FakeGmail implements MailPort {
   threads = new Map<string, RawMessage[]>();
   drafts = new Map<string, { threadId: string; messageId: string }>();
 
@@ -57,21 +57,14 @@ export class FakeGmail implements GmailPort {
     return { id, labelIds, internalDate: at, headers: { ...h, "message-id": `<${id}@fake.mail>` }, text };
   }
 
-  async myAddress() { return ME; }
-  async listSentThreadIds(max: number) { return [...this.threads.keys()].slice(0, max); }
+  async myAddresses() { return [ME]; }
+  async listThreadIds(max: number) { return [...this.threads.keys()].slice(0, max); }
   async getThread(id: string): Promise<RawThread> {
     return { id, messages: structuredClone(this.threads.get(id) ?? []) };
   }
-  async createDraft(threadId: string, raw: string) {
-    const decoded = Buffer.from(raw, "base64url").toString("utf8");
-    const [head, ...body] = decoded.split("\r\n\r\n");
-    const headers: Record<string, string> = {};
-    for (const line of head.split("\r\n")) {
-      const i = line.indexOf(":");
-      headers[line.slice(0, i).toLowerCase()] = line.slice(i + 1).trim();
-    }
-    const m = this.msg(["DRAFT"], { from: headers.from, to: headers.to, subject: headers.subject }, body.join("\r\n\r\n").trim(), Date.now());
-    m.headers = { ...headers, "message-id": m.headers["message-id"] };
+  async createDraft({ threadId, to, subject, inReplyTo, body }: DraftReply) {
+    const m = this.msg(["DRAFT"], { from: ME, to, subject: /^re:/i.test(subject) ? subject : `Re: ${subject}` }, body, Date.now());
+    m.headers["in-reply-to"] = inReplyTo;
     this.threads.get(threadId)!.push(m);
     const draftId = nextId("d");
     this.drafts.set(draftId, { threadId, messageId: m.id });

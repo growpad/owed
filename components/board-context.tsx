@@ -3,7 +3,7 @@
 import { createContext, useContext } from "react";
 import type { BoardRow } from "@/lib/types";
 
-export type Board = { stallAfter: string; fake: boolean; now: string; loops: BoardRow[] };
+export type Board = { stallAfter: string; fake: boolean; ccAddress: string | null; now: string; loops: BoardRow[] };
 
 export async function api<T>(path: string, body?: unknown): Promise<T> {
   const res = await fetch(

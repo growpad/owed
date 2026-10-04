@@ -15,7 +15,15 @@ export type ThreadSummary = {
 
 /** "Sam Lee <sam@x.com>" -> { name: "Sam Lee", email: "sam@x.com" } */
 export function parseAddress(value: string | undefined): { name: string | null; email: string } {
-  const v = (value ?? "").split(",")[0].trim();
+  return parseAddresses(value)[0] ?? { name: null, email: "" };
+}
+
+// ponytail: splits on commas, so a quoted display name containing a comma breaks; fine for demo mail.
+export function parseAddresses(value: string | undefined) {
+  return (value ?? "").split(",").map((v) => v.trim()).filter(Boolean).map(parseOne);
+}
+
+function parseOne(v: string): { name: string | null; email: string } {
   const m = v.match(/^\s*"?([^"<]*?)"?\s*<([^>]+)>\s*$/);
   if (m) return { name: m[1].trim() || null, email: m[2].trim().toLowerCase() };
   return { name: null, email: v.toLowerCase() };
@@ -27,15 +35,17 @@ const isDraft = (m: RawMessage) => m.labelIds.includes("DRAFT");
  * Gmail keeps drafts inside the thread with the DRAFT label. They must not
  * count as "the last message", or creating a draft would reset the silence clock.
  */
-export function summarizeThread(thread: RawThread, myAddress: string): ThreadSummary | null {
-  const me = myAddress.toLowerCase();
+export function summarizeThread(thread: RawThread, mine: string[]): ThreadSummary | null {
+  const ours = new Set(mine.map((a) => a.toLowerCase()));
   const msgs = thread.messages.filter((m) => !isDraft(m)).sort((a, b) => a.internalDate - b.internalDate);
   if (msgs.length === 0) return null;
   const last = msgs[msgs.length - 1];
   const from = parseAddress(last.headers["from"]);
-  const lastFromMe = from.email === me;
+  const lastFromMe = ours.has(from.email);
   // The counterpart is whoever is on the other side of the last message.
-  const other = lastFromMe ? parseAddress(last.headers["to"]) : from;
+  const other = lastFromMe
+    ? parseAddresses(`${last.headers["to"] ?? ""},${last.headers["cc"] ?? ""}`).find((a) => !ours.has(a.email)) ?? parseAddress(last.headers["to"])
+    : from;
   const tail = msgs
     .slice(-3)
     .map((m) => `From: ${m.headers["from"] ?? "?"}\nDate: ${new Date(m.internalDate).toISOString()}\n${m.text.trim()}`)

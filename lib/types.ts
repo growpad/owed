@@ -13,12 +13,15 @@ export type RawMessage = {
 
 export type RawThread = { id: string; messages: RawMessage[] };
 
-export interface GmailPort {
-  myAddress(): Promise<string>;
-  listSentThreadIds(max: number): Promise<string[]>;
+export type DraftReply = { threadId: string; to: string; subject: string; inReplyTo: string; body: string };
+
+/** Gmail (reads your sent mail) or AgentMail (Owed's own inbox that you CC). */
+export interface MailPort {
+  myAddresses(): Promise<string[]>; // "our side" of a thread: you, and Owed's inbox if it has one
+  listThreadIds(max: number): Promise<string[]>;
   getThread(id: string): Promise<RawThread>;
-  createDraft(threadId: string, raw: string): Promise<string>; // returns draft id
-  sendDraft(draftId: string): Promise<string>; // returns the new SENT message id
+  createDraft(d: DraftReply): Promise<string>; // returns draft id
+  sendDraft(draftId: string): Promise<string>; // returns the new sent message id
 }
 
 export type Classification = {
@@ -30,6 +33,7 @@ export type Classification = {
 
 export type DraftInput = {
   myName: string;
+  assistant: boolean; // true: Owed writes as itself, on the user's behalf
   subject: string;
   counterpartName: string;
   bodyTail: string;
@@ -45,9 +49,10 @@ export interface LlmPort {
 
 export type Deps = {
   sql: Sql;
-  gmail: GmailPort;
+  mail: MailPort;
   llm: LlmPort;
   myName: string;
+  assistant: boolean;
   stallAfter: string; // Postgres interval, e.g. '5 days' or '20 minutes'
 };
 

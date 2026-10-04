@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { BoardRow } from "@/lib/types";
 import { api, useBoard } from "./board-context";
 
@@ -48,6 +48,13 @@ export function LoopCard({ loop, fake }: { loop: BoardRow; fake: boolean }) {
     setHistory(r.events);
   }
 
+  // Keep an open history panel live: a poll that flips the state also adds an event.
+  const historyOpen = history !== null;
+  useEffect(() => {
+    if (historyOpen) loadHistory();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loop.state, historyOpen]);
+
   const name = loop.counterpart_name ?? loop.counterpart;
   const stakes = loop.stakes_usd != null ? `$${Number(loop.stakes_usd).toLocaleString("en-US")}` : null;
   const state = loop.is_stalled ? "quiet" : loop.state;
@@ -69,13 +76,13 @@ export function LoopCard({ loop, fake }: { loop: BoardRow; fake: boolean }) {
 
       {loop.state === "drafted" && loop.follow_up_body && (
         <blockquote className="draft">
-          <span className="label">Draft in your Gmail thread</span>
+          <span className="label">Draft ready in the thread · nothing leaves until you click Send</span>
           {loop.follow_up_body}
         </blockquote>
       )}
 
       {loop.state === "sent" && loop.receipt && (
-        <p className="receipt">Sent from your Gmail · receipt <code>{loop.receipt}</code></p>
+        <p className="receipt">Sent in the thread · receipt <code>{loop.receipt}</code></p>
       )}
 
       {loop.state === "replied" && (
@@ -111,7 +118,7 @@ export function LoopCard({ loop, fake }: { loop: BoardRow; fake: boolean }) {
             Simulate their reply (fake mode)
           </button>
         )}
-        <button className="ghost" onClick={() => (history ? setHistory(null) : loadHistory())}>
+        <button className="ghost" onClick={() => setHistory(history ? null : [])}>
           {history ? "Hide history" : "History"}
         </button>
       </div>
@@ -122,7 +129,7 @@ export function LoopCard({ loop, fake }: { loop: BoardRow; fake: boolean }) {
         <ol className="history">
           {history.map((e, i) => (
             <li key={i}>
-              <span className="ev">{e.type.replace("_", " ")}</span>
+              <span className="ev">{e.type.replaceAll("_", " ")}</span>
               <time>{new Date(e.created_at).toLocaleTimeString()}</time>
             </li>
           ))}
