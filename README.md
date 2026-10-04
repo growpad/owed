@@ -25,7 +25,9 @@ assistant-ui chat ──> /api/board          │
 - **Stall detector is SQL**, not an LLM: you sent the last message, and it is older than `STALL_AFTER`.
 - **Drafts never reset the clock:** Gmail stores drafts as `DRAFT`-labelled messages in the thread; sync skips them.
 - **Memory:** every classify, draft, send and reply is a row in `events`; the drafter reads the last 10 before writing.
-- **Safety:** nothing sends without a click; email text is treated as data in both prompts.
+- **Safety:** nothing sends without a click, and a click sends once (atomic claim, so double clicks and retries cannot duplicate). Optional `SEND_ALLOWLIST` and `SEND_BUDGET`. Email text is treated as data in both prompts. Bounces and auto-replies (RFC 3834) never count as a reply.
+- **Deploy safely:** set `APP_PASSWORD` and the whole app sits behind HTTP Basic Auth, since its API can send email.
+- **Resilience:** every outbound call has a timeout; AgentMail `429`s are retried with `Retry-After`.
 - **The chat is deterministic:** "What am I owed?" calls the board directly and renders live cards as an assistant-ui tool UI. The model is used where it adds value: classifying threads and writing drafts.
 
 ## Setup (about 15 minutes)
@@ -40,7 +42,7 @@ assistant-ui chat ──> /api/board          │
    npm run token       # gmail only: sign in, paste GOOGLE_REFRESH_TOKEN into .env
    npm run dev         # http://localhost:3000
    ```
-5. **Deploy:** import the repo on [vercel.com/new](https://vercel.com/new) and add the same env vars.
+5. **Deploy:** import the repo on [vercel.com/new](https://vercel.com/new), add the same env vars plus `APP_PASSWORD`. Functions run in `cle1` (`vercel.json`), next to Neon's us-east-2.
 
 No gateway access? Set `LLM_BASE_URL=https://api.openai.com/v1` and `LLM_API_KEY` instead.
 
@@ -61,7 +63,7 @@ Submission text, video script and judge Q&A: [DEMO.md](DEMO.md).
 ## Tests
 
 ```bash
-npm test   # end-to-end flow on in-memory Postgres + fake Gmail/LLM (15 tests)
+npm test   # end-to-end flow on in-memory Postgres + fake Gmail/LLM (21 tests)
 ```
 
 ## Files

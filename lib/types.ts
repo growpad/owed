@@ -22,6 +22,7 @@ export interface MailPort {
   getThread(id: string): Promise<RawThread>;
   createDraft(d: DraftReply): Promise<string>; // returns draft id
   sendDraft(draftId: string): Promise<string>; // returns the new sent message id
+  deleteDraft(draftId: string): Promise<void>;
 }
 
 export type Classification = {

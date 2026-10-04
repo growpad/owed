@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { board, draft, events, poll, send, setState, sync } from "@/lib/owed";
-import { buildReply, parseAddress, summarizeThread } from "@/lib/mail";
+import { buildReply, isAutomated, parseAddress, summarizeThread } from "@/lib/mail";
+import { uuid } from "@/lib/route";
 import { parseClassification } from "@/lib/llm";
 import { stripQuoted } from "@/lib/gmail";
 import { FakeGmail, fakeLlm, makePgliteSql, ME } from "@/lib/fake";
@@ -137,6 +138,48 @@ describe("Owed end-to-end", () => {
     }
   });
 
+  it("a bounce or out-of-office does not count as their reply", async () => {
+    await sync(deps);
+    const loop = await byThread("t-deposit");
+    await send(deps, (await draft(deps, loop.id)).followUpId);
+    const t = gmail.threads.get("t-deposit")!;
+    const msg = (id: string, headers: Record<string, string>) =>
+      ({ id, labelIds: ["INBOX"], internalDate: Date.now(), headers: { to: ME, subject: "x", "message-id": `<${id}>`, ...headers }, text: "auto" });
+    t.push(msg("b1", { from: "Mail Delivery Subsystem <mailer-daemon@googlemail.com>" }));
+    t.push(msg("b2", { from: "Sam <sam.landlord@example.com>", "auto-submitted": "auto-replied" }));
+    expect((await poll(deps)).replied).toEqual([]);
+    expect((await byThread("t-deposit")).state).toBe("sent");
+  });
+
+  it("a double click sends once", async () => {
+    await sync(deps);
+    const d = await draft(deps, (await byThread("t-pilot")).id);
+    const results = await Promise.allSettled([send(deps, d.followUpId), send(deps, d.followUpId)]);
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    const sent = gmail.threads.get("t-pilot")!.filter((m) => m.labelIds.includes("SENT"));
+    expect(sent).toHaveLength(2); // the original ask + exactly one nudge
+  });
+
+  it("a failed send releases the claim so the user can retry", async () => {
+    await sync(deps);
+    const d = await draft(deps, (await byThread("t-refund")).id);
+    const real = gmail.sendDraft.bind(gmail);
+    gmail.sendDraft = async () => { throw new Error("network down"); };
+    await expect(send(deps, d.followUpId)).rejects.toThrow(/network/);
+    expect((await deps.sql(`select status from follow_ups where id = $1`, [d.followUpId]))[0].status).toBe("draft");
+    gmail.sendDraft = real;
+    await expect(send(deps, d.followUpId)).resolves.toHaveProperty("messageId");
+  });
+
+  it("redraft removes the replaced draft from the mailbox", async () => {
+    await sync(deps);
+    const loop = await byThread("t-deposit");
+    await draft(deps, loop.id);
+    await draft(deps, loop.id);
+    expect(gmail.drafts.size).toBe(1);
+    expect(gmail.threads.get("t-deposit")!.filter((m) => m.labelIds.includes("DRAFT"))).toHaveLength(1);
+  });
+
   it("drafting a replied loop is refused", async () => {
     await sync(deps);
     const loop = await byThread("t-pilot");
@@ -194,6 +237,21 @@ describe("helpers", () => {
     expect([s2.lastFromMe, s2.counterpart]).toEqual([true, "sam@x.com"]);
     const s3 = summarizeThread({ id: "t", messages: [ask, nudge, reply] }, [OWED, JD])!;
     expect([s3.lastFromMe, s3.counterpart]).toEqual([false, "sam@x.com"]);
+  });
+
+  it("flags machine mail", () => {
+    const m = (h: Record<string, string>) => ({ id: "1", labelIds: [], internalDate: 0, headers: { from: "a@b.com", ...h }, text: "" });
+    expect(isAutomated(m({}))).toBe(false);
+    expect(isAutomated(m({ "auto-submitted": "no" }))).toBe(false);
+    expect(isAutomated(m({ "auto-submitted": "auto-replied" }))).toBe(true);
+    expect(isAutomated(m({ precedence: "bulk" }))).toBe(true);
+    expect(isAutomated(m({ from: "MAILER-DAEMON@x.com" }))).toBe(true);
+  });
+
+  it("validates ids at the API boundary", () => {
+    expect(uuid("3f2b8c1e-4d5a-4b6c-8d7e-9f0a1b2c3d4e", "id")).toBe("3f2b8c1e-4d5a-4b6c-8d7e-9f0a1b2c3d4e");
+    expect(() => uuid("1; drop table loops", "id")).toThrow(/UUID/);
+    expect(() => uuid(undefined, "id")).toThrow(/UUID/);
   });
 
   it("parses classifier JSON wrapped in prose or fences", () => {

@@ -56,7 +56,7 @@ export async function board(deps: Deps): Promise<BoardRow[]> {
      from loops l
      join threads t on t.id = l.thread_id
      left join lateral (
-       select * from follow_ups f where f.loop_id = l.id and f.status in ('draft','sent')
+       select * from follow_ups f where f.loop_id = l.id and f.status in ('draft','sending','sent')
        order by f.created_at desc limit 1) f on true
      where l.state not in ('dismissed','resolved')
      order by l.stakes_usd desc nulls last, t.last_msg_at asc
@@ -99,6 +99,7 @@ export async function draft(deps: Deps, loopId: string) {
     openQuestion: loop.open_question,
     priorEvents: prior,
   });
+  const stale = await deps.sql(`select gmail_draft_id from follow_ups where loop_id = $1 and status = 'draft'`, [loopId]);
   const draftId = await deps.mail.createDraft({
     threadId: loop.thread_id, to: loop.counterpart, subject: loop.subject, inReplyTo: loop.last_msg_id, body,
   });
@@ -111,21 +112,40 @@ export async function draft(deps: Deps, loopId: string) {
      returning payload->>'follow_up_id' as follow_up_id`,
     [loopId, body, draftId],
   );
+  // Remove the replaced draft from the mailbox too. Best effort: the DB already marks it discarded.
+  for (const s of stale) {
+    if (s.gmail_draft_id) await deps.mail.deleteDraft(s.gmail_draft_id).catch((e) => console.warn("[owed] stale draft", e));
+  }
   return { followUpId: rows[0].follow_up_id as string, body };
 }
 
 /** F7: send only on an explicit call; Gmail deletes the draft and returns a new SENT message id. */
 export async function send(deps: Deps, followUpId: string) {
-  const rows = await deps.sql(`select * from follow_ups where id = $1`, [followUpId]);
-  if (rows.length === 0) throw new HttpError(404, "follow-up not found");
-  const f = rows[0];
-  if (f.status !== "draft" || !f.gmail_draft_id) throw new HttpError(409, `follow-up is ${f.status}`);
   const budget = Number(process.env.SEND_BUDGET);
-  const [{ n }] = await deps.sql(`select count(*)::int as n from follow_ups where status = 'sent'`);
+  const [{ n }] = await deps.sql(`select count(*)::int as n from follow_ups where status in ('sending','sent')`);
   if (budget > 0 && n >= budget) throw new HttpError(429, `send budget used: ${n}/${budget} (SEND_BUDGET)`);
-  const messageId = await deps.mail.sendDraft(f.gmail_draft_id);
+  // Claim the follow-up atomically, so a double click or a retry cannot send twice.
+  const claimed = await deps.sql(
+    `update follow_ups set status = 'sending' where id = $1 and status = 'draft' and gmail_draft_id is not null returning *`,
+    [followUpId],
+  );
+  if (claimed.length === 0) {
+    const rows = await deps.sql(`select status from follow_ups where id = $1`, [followUpId]);
+    if (rows.length === 0) throw new HttpError(404, "follow-up not found");
+    throw new HttpError(409, `follow-up is ${rows[0].status}`);
+  }
+  const f = claimed[0];
+  let messageId: string;
+  try {
+    messageId = await deps.mail.sendDraft(f.gmail_draft_id);
+  } catch (e) {
+    // Safe to release: both providers delete a draft once it is sent, so a retry of a draft
+    // that did go out fails with "not found" instead of sending a second copy.
+    await deps.sql(`update follow_ups set status = 'draft' where id = $1 and status = 'sending'`, [followUpId]);
+    throw e;
+  }
   await deps.sql(
-    `with f as (update follow_ups set status = 'sent', sent_at = now(), gmail_message_id = $2 where id = $1 returning loop_id),
+    `with f as (update follow_ups set status = 'sent', sent_at = now(), gmail_message_id = $2 where id = $1 and status = 'sending' returning loop_id),
           l as (update loops set state = 'sent', updated_at = now() where id = (select loop_id from f)),
           t as (update threads set last_from_me = true, last_msg_at = now()
                 where id = (select thread_id from loops where id = (select loop_id from f)))

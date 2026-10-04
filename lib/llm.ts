@@ -40,6 +40,7 @@ async function chat(messages: Msg[]): Promise<string> {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
     body: JSON.stringify({ model, messages }),
+    signal: AbortSignal.timeout(25_000), // under the 60 s route budget, leaving room for one retry
   });
   if (!res.ok) throw new Error(`LLM ${res.status}: ${(await res.text()).slice(0, 300)}`);
   const data = await res.json();

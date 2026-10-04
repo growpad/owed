@@ -31,13 +31,26 @@ function parseOne(v: string): { name: string | null; email: string } {
 
 const isDraft = (m: RawMessage) => m.labelIds.includes("DRAFT");
 
+/** Bounces, out-of-office and other machine mail are not a human answer (RFC 3834 Auto-Submitted). */
+export function isAutomated(m: RawMessage): boolean {
+  const auto = (m.headers["auto-submitted"] ?? "no").toLowerCase();
+  const from = (m.headers["from"] ?? "").toLowerCase();
+  return (
+    auto !== "no" ||
+    "x-autoreply" in m.headers ||
+    "x-autorespond" in m.headers ||
+    /^(auto_reply|bulk|junk)$/.test((m.headers["precedence"] ?? "").toLowerCase()) ||
+    /mailer-daemon|postmaster@/.test(from)
+  );
+}
+
 /**
  * Gmail keeps drafts inside the thread with the DRAFT label. They must not
  * count as "the last message", or creating a draft would reset the silence clock.
  */
 export function summarizeThread(thread: RawThread, mine: string[]): ThreadSummary | null {
   const ours = new Set(mine.map((a) => a.toLowerCase()));
-  const msgs = thread.messages.filter((m) => !isDraft(m)).sort((a, b) => a.internalDate - b.internalDate);
+  const msgs = thread.messages.filter((m) => !isDraft(m) && !isAutomated(m)).sort((a, b) => a.internalDate - b.internalDate);
   if (msgs.length === 0) return null;
   const last = msgs[msgs.length - 1];
   const from = parseAddress(last.headers["from"]);

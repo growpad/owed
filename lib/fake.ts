@@ -70,6 +70,13 @@ export class FakeGmail implements MailPort {
     this.drafts.set(draftId, { threadId, messageId: m.id });
     return draftId;
   }
+  async deleteDraft(draftId: string) {
+    const d = this.drafts.get(draftId);
+    if (!d) throw new Error("draft not found");
+    const list = this.threads.get(d.threadId)!;
+    list.splice(list.findIndex((m) => m.id === d.messageId), 1);
+    this.drafts.delete(draftId);
+  }
   async sendDraft(draftId: string) {
     const d = this.drafts.get(draftId);
     if (!d) throw new Error("draft not found");

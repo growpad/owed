@@ -34,7 +34,7 @@ Recording: screen and voiceover, 1080p. One rehearsal take, then the real one on
 ## Judge Q&A
 
 1. **Does it read my inbox?** No. Owed only sees threads you CC it on. Want it to scan your own sent mail instead? `MAIL_PROVIDER=gmail` switches to the Gmail adapter; same five-function interface.
-2. **Can it send something I didn't approve?** No. Every send is a click on a draft you can read first. Sending twice is refused, `SEND_ALLOWLIST` limits recipients, `SEND_BUDGET` caps volume. Email text is treated as data in both prompts.
+2. **Can it send something I didn't approve?** No. Every send is a click on a draft you can read first. Sending twice is refused, `SEND_ALLOWLIST` limits recipients, `SEND_BUDGET` caps volume, and the deployed app sits behind a password. Email text is treated as data in both prompts.
 3. **What if they reply only to me, not to Owed?** Owed is a visible CC, so reply-all keeps it in the thread, and every reply to Owed's nudge goes to Owed. If they reply only to you, one click on Mark resolved closes it.
 4. **Why not an agent framework?** Two model calls, classify and draft, through Neon AI Gateway. The stall detector is SQL, and the chat answers "What am I owed?" deterministically, so the demo cannot break on tool calling.
 5. **Where's the memory?** An append-only `events` table in Neon. Every classify, flag, draft, send and reply is a row; the drafter reads the last 10 so it never repeats a nudge.

@@ -16,18 +16,29 @@ type AmMessage = {
   extracted_text?: string; // body without quoted history
   labels: string[];
   timestamp: string;
+  headers?: Record<string, string>;
 };
+
+// Only the headers Owed reads: isAutomated() in lib/mail.ts uses them to skip bounces and auto-replies.
+const KEEP = ["auto-submitted", "x-autoreply", "x-autorespond", "precedence"];
 
 export function realAgentMail(env: { apiKey: string; inbox: string; owners: string[] }): MailPort {
   const inbox = encodeURIComponent(env.inbox);
 
-  async function call<T>(path: string, init?: RequestInit): Promise<T> {
+  async function call<T>(path: string, init?: RequestInit, attempt = 0): Promise<T> {
     const res = await fetch(`${BASE}/inboxes/${inbox}${path}`, {
       ...init,
       headers: { Authorization: `Bearer ${env.apiKey}`, "Content-Type": "application/json" },
+      signal: AbortSignal.timeout(15_000),
     });
+    // AgentMail rate limits answer 429 + Retry-After (usually 1 s); retry twice, backing off.
+    if (res.status === 429 && attempt < 2) {
+      const wait = Number(res.headers.get("retry-after")) || 1;
+      await new Promise((r) => setTimeout(r, wait * 1000 * 2 ** attempt));
+      return call<T>(path, init, attempt + 1);
+    }
     if (!res.ok) throw new Error(`AgentMail ${res.status}: ${(await res.text()).slice(0, 300)}`);
-    return res.json() as Promise<T>;
+    return res.status === 204 ? (undefined as T) : (res.json() as Promise<T>);
   }
 
   return {
@@ -48,6 +59,9 @@ export function realAgentMail(env: { apiKey: string; inbox: string; owners: stri
           labelIds: m.labels.map((l) => l.toUpperCase()),
           internalDate: Date.parse(m.timestamp),
           headers: {
+            ...Object.fromEntries(
+              Object.entries(m.headers ?? {}).map(([k, v]) => [k.toLowerCase(), v]).filter(([k]) => KEEP.includes(k)),
+            ),
             from: m.from,
             to: (m.to ?? []).join(", "),
             cc: (m.cc ?? []).join(", "),
@@ -70,6 +84,9 @@ export function realAgentMail(env: { apiKey: string; inbox: string; owners: stri
         }),
       });
       return r.draft_id;
+    },
+    async deleteDraft(draftId) {
+      await call(`/drafts/${encodeURIComponent(draftId)}`, { method: "DELETE" });
     },
     async sendDraft(draftId) {
       const r = await call<{ message_id: string }>(`/drafts/${encodeURIComponent(draftId)}/send`, { method: "POST", body: "{}" });

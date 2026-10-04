@@ -22,7 +22,7 @@ const makeAdapter = (refresh: () => Promise<void>): ChatModelAdapter => ({
     if (/sync|scan|refresh|check (my )?mail/i.test(text)) {
       const r = await api<{ threads: number; classified: number; owed: number }>("/api/sync", {});
       await refresh();
-      return { content: [{ type: "text", text: `Scanned ${r.threads} sent threads. ${r.owed} new things you're owed. Ask "What am I owed?" to see them.` }] };
+      return { content: [{ type: "text", text: `Scanned ${r.threads} threads. ${r.owed} new things you're owed. Ask "What am I owed?" to see them.` }] };
     }
     if (/ow(e|ed|ing)|waiting|open loops|what.*due/i.test(text)) {
       const b = await api<Board>("/api/board");

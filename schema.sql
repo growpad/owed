@@ -29,7 +29,7 @@ create table if not exists follow_ups (
   body             text not null,
   gmail_draft_id   text,
   gmail_message_id text,                      -- receipt after send
-  status           text not null default 'draft', -- draft|sent|discarded
+  status           text not null default 'draft', -- draft|sending|sent|discarded
   created_at       timestamptz not null default now(),
   sent_at          timestamptz
 );
