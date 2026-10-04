@@ -99,7 +99,7 @@ export default function Page() {
     <BoardContext.Provider value={ctx}>
       <AssistantRuntimeProvider runtime={runtime}>
         <main className="shell">
-          {board?.fake && <div className="banner">FAKE MODE · in-memory Gmail and LLM · do not record the submission video in this mode</div>}
+          {board?.fake && <div className="banner">FAKE MODE · in-memory mail, LLM and database · do not record the submission video in this mode</div>}
           <header className="top">
             <div>
               <h1>Owed</h1>
