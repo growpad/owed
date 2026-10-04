@@ -46,7 +46,7 @@ function BoardToolUI() {
   return (
     <div className="board">
       {board.loops.map((l) => (
-        <LoopCard key={l.id} loop={l} fake={board.fake} />
+        <LoopCard key={l.id} loop={l} />
       ))}
     </div>
   );
@@ -99,7 +99,6 @@ export default function Page() {
     <BoardContext.Provider value={ctx}>
       <AssistantRuntimeProvider runtime={runtime}>
         <main className="shell">
-          {board?.fake && <div className="banner">FAKE MODE · in-memory mail, LLM and database · do not record the submission video in this mode</div>}
           <header className="top">
             <div>
               <h1>Owed</h1>

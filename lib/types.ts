@@ -1,5 +1,5 @@
 // Shared shapes. The core logic in lib/owed.ts only depends on these
-// interfaces, so tests and fake mode swap in in-memory versions.
+// interfaces, so tests swap in in-memory versions.
 
 export type Sql = (text: string, params?: unknown[]) => Promise<Record<string, any>[]>;
 

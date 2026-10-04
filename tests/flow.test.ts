@@ -4,15 +4,15 @@ import { buildReply, isAutomated, parseAddress, summarizeThread } from "@/lib/ma
 import { uuid } from "@/lib/route";
 import { parseClassification } from "@/lib/llm";
 import { stripQuoted } from "@/lib/gmail";
-import { FakeGmail, fakeLlm, makePgliteSql, ME } from "@/lib/fake";
+import { TestMailbox, scriptedLlm, makePgliteSql, ME } from "./doubles";
 import type { Deps } from "@/lib/types";
 
 let deps: Deps;
-let gmail: FakeGmail;
+let gmail: TestMailbox;
 
 beforeEach(async () => {
-  gmail = new FakeGmail(); // seeds sent 3 hours ago
-  deps = { sql: await makePgliteSql(), mail: gmail, llm: fakeLlm, myName: "Owed Demo", assistant: false, stallAfter: "20 minutes" };
+  gmail = new TestMailbox(); // seeds sent 3 hours ago
+  deps = { sql: await makePgliteSql(), mail: gmail, llm: scriptedLlm, myName: "Test User", assistant: false, stallAfter: "20 minutes" };
 });
 
 const byThread = async (id: string) => (await board(deps)).find((l) => l.thread_id === id)!;

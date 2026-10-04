@@ -29,7 +29,7 @@
 6. **1:55–2:15 Memory.** Open History on the card, then the `events` table in the Neon console: classified, flagged, drafted, sent, reply received. The drafter reads these before every draft.
 7. **2:15–2:30 Close.** "Neon Postgres and AI Gateway, assistant-ui, AgentMail, and an open repo reviewed by CodeRabbit. The full product is Operator Brief."
 
-Recording: screen and voiceover, 1080p. One rehearsal take, then the real one on the spare seed. Never record in fake mode (yellow banner).
+Recording: screen and voiceover, 1080p. One rehearsal take, then the real one on the spare seed.
 
 ## Judge Q&A
 

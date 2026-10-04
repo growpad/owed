@@ -23,7 +23,7 @@ const LABEL: Record<string, string> = {
 
 type Ev = { type: string; payload: Record<string, unknown>; created_at: string };
 
-export function LoopCard({ loop, fake }: { loop: BoardRow; fake: boolean }) {
+export function LoopCard({ loop }: { loop: BoardRow }) {
   const { refresh } = useBoard();
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -111,11 +111,6 @@ export function LoopCard({ loop, fake }: { loop: BoardRow; fake: boolean }) {
         {loop.state === "replied" && (
           <button className="primary" disabled={!!busy} onClick={() => act("resolve", () => api("/api/state", { loopId: loop.id, state: "resolved" }))}>
             Mark resolved
-          </button>
-        )}
-        {loop.state === "sent" && fake && (
-          <button disabled={!!busy} onClick={() => act("reply", () => api("/api/fake-reply", { threadId: loop.thread_id }))}>
-            Simulate their reply (fake mode)
           </button>
         )}
         <button className="ghost" onClick={() => setHistory(history ? null : [])}>

@@ -1,5 +1,5 @@
 // Core flow: sync -> board -> draft -> send -> poll. No framework code here,
-// so the same functions run in API routes, tests and fake mode.
+// so the same functions run in API routes and tests.
 import { summarizeThread, type ThreadSummary } from "./mail";
 import type { BoardRow, Deps } from "./types";
 

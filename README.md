@@ -52,10 +52,6 @@ No gateway access? Set `LLM_BASE_URL=https://api.openai.com/v1` and `LLM_API_KEY
 2. Set `STALL_AFTER=20 minutes` (the UI shows a "Demo clock" label; real use is `5 days`).
 3. After 20 minutes: "Sync my inbox", then "What am I owed?". Draft, Send (Owed sends it with you in CC), then reply-all from the other account. The card flips within about 10 seconds.
 
-## Fake mode (UI work only)
-
-`OWED_FAKE=1 npm run dev` runs with in-memory Postgres (PGlite), a fake Gmail with seeded threads and a fake LLM. The UI shows a **FAKE MODE** banner and a "Simulate their reply" button. Do not record a submission in fake mode.
-
 ## Demo kit
 
 Submission text, video script and judge Q&A: [DEMO.md](DEMO.md).
@@ -63,7 +59,7 @@ Submission text, video script and judge Q&A: [DEMO.md](DEMO.md).
 ## Tests
 
 ```bash
-npm test   # end-to-end flow on in-memory Postgres + fake Gmail/LLM (21 tests)
+npm test   # end-to-end flow on in-memory Postgres (PGlite, real schema) with test doubles for mail and LLM (21 tests)
 ```
 
 ## Files
@@ -75,9 +71,10 @@ npm test   # end-to-end flow on in-memory Postgres + fake Gmail/LLM (21 tests)
 | `lib/agentmail.ts` | AgentMail adapter: Owed's own inbox, CC model |
 | `lib/gmail.ts` | Gmail adapter (refresh token, one demo account) |
 | `lib/llm.ts` | prompts + OpenAI-compatible call to Neon AI Gateway |
-| `lib/fake.ts` | PGlite, fake Gmail, fake LLM for tests and fake mode |
 | `app/page.tsx` | assistant-ui chat; live board with 10 s polling |
 | `components/LoopCard.tsx` | card: draft, send, reply, history |
+| `middleware.ts` | password gate (`APP_PASSWORD`) for deploys |
+| `tests/` | end-to-end tests; `doubles.ts` holds the in-memory mailbox, scripted LLM and PGlite |
 | `schema.sql` | threads, loops, follow_ups, events |
 
 The full product is [Operator Brief](https://operatorbrief.xyz). MIT licensed.

@@ -1,12 +1,11 @@
-// In-memory Gmail, LLM and Postgres (PGlite) for tests and OWED_FAKE=1 UI work.
-// Fake mode is for building the UI while Google OAuth is being set up.
-// Never record the submission video in fake mode: the UI shows a FAKE MODE banner.
+// Test doubles: in-memory mailbox, scripted LLM and Postgres (PGlite) running the real schema.
+// Test-only. The app itself always runs on real mail, the real model and Neon.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
-import type { Classification, DraftInput, DraftReply, MailPort, LlmPort, RawMessage, RawThread, Sql } from "./types";
+import type { Classification, DraftInput, DraftReply, MailPort, LlmPort, RawMessage, RawThread, Sql } from "@/lib/types";
 
-export const ME = "owed.demo@gmail.com";
+export const ME = "test.user@example.com";
 
 export async function makePgliteSql(): Promise<Sql> {
   const db = new PGlite();
@@ -17,7 +16,7 @@ export async function makePgliteSql(): Promise<Sql> {
 let counter = 0;
 const nextId = (p: string) => `${p}${++counter}`;
 
-export class FakeGmail implements MailPort {
+export class TestMailbox implements MailPort {
   threads = new Map<string, RawMessage[]>();
   drafts = new Map<string, { threadId: string; messageId: string }>();
 
@@ -40,11 +39,11 @@ export class FakeGmail implements MailPort {
 
   addOutgoing(threadId: string, to: string, subject: string, text: string, at: number) {
     const list = this.threads.get(threadId) ?? [];
-    list.push(this.msg(["SENT"], { from: `Owed Demo <${ME}>`, to, subject }, text, at));
+    list.push(this.msg(["SENT"], { from: `Test User <${ME}>`, to, subject }, text, at));
     this.threads.set(threadId, list);
   }
 
-  /** Simulate the other person replying (tests and fake-mode demo button). */
+  /** The other person replies in the thread. */
   reply(threadId: string, text: string) {
     const list = this.threads.get(threadId);
     if (!list) throw new Error("no thread");
@@ -54,7 +53,7 @@ export class FakeGmail implements MailPort {
 
   private msg(labelIds: string[], h: { from: string; to: string; subject: string }, text: string, at: number): RawMessage {
     const id = nextId("m");
-    return { id, labelIds, internalDate: at, headers: { ...h, "message-id": `<${id}@fake.mail>` }, text };
+    return { id, labelIds, internalDate: at, headers: { ...h, "message-id": `<${id}@test.mail>` }, text };
   }
 
   async myAddresses() { return [ME]; }
@@ -82,7 +81,7 @@ export class FakeGmail implements MailPort {
     if (!d) throw new Error("draft not found");
     const list = this.threads.get(d.threadId)!;
     const i = list.findIndex((m) => m.id === d.messageId);
-    // Gmail deletes the draft and creates a new SENT message with a new id.
+    // Like Gmail and AgentMail: sending deletes the draft and creates a new SENT message with a new id.
     const sent = { ...list[i], id: nextId("m"), labelIds: ["SENT"], internalDate: Date.now() };
     list.splice(i, 1, sent);
     this.drafts.delete(draftId);
@@ -90,7 +89,7 @@ export class FakeGmail implements MailPort {
   }
 }
 
-export const fakeLlm: LlmPort = {
+export const scriptedLlm: LlmPort = {
   async classify(text): Promise<Classification> {
     const amount = text.match(/\$([\d,]+)/);
     const owed = /\?/.test(text) && !/thanks for lunch/i.test(text);
@@ -103,6 +102,6 @@ export const fakeLlm: LlmPort = {
   },
   async draft(input: DraftInput) {
     const firstName = input.counterpartName.split(/[\s<@]/)[0] || "there";
-    return `Hi ${firstName}, following up on "${input.subject}". [fake LLM draft: ${input.whatOwed ?? "item"}] Could you confirm by Friday?`;
+    return `Hi ${firstName}, following up on "${input.subject}". [test draft: ${input.whatOwed ?? "item"}] Could you confirm by Friday?`;
   },
 };
