@@ -22,10 +22,11 @@ const makeAdapter = (refresh: () => Promise<void>): ChatModelAdapter => ({
     const text = last.content.map((p) => (p.type === "text" ? p.text : "")).join(" ");
     try {
       if (/sync|scan|refresh|check (my )?mail/i.test(text)) {
-        const r = await api<{ threads: number; classified: number; owed: number }>("/api/sync", {});
+        const r = await api<{ threads: number; classified: number; owed: number; failed: number }>("/api/sync", {});
         await refresh();
         const found = r.owed === 0 ? "Nothing new is owed to you." : `Found ${r.owed} new thing${r.owed === 1 ? "" : "s"} you're owed.`;
-        return { content: [{ type: "text", text: `Checked ${r.threads} thread${r.threads === 1 ? "" : "s"}. ${found}` }] };
+        const partial = r.failed ? ` ${r.failed} thread${r.failed === 1 ? "" : "s"} couldn't be read; Owed will retry them on the next check.` : "";
+        return { content: [{ type: "text", text: `Checked ${r.threads} thread${r.threads === 1 ? "" : "s"}. ${found}${partial}` }] };
       }
       if (/ow(e|ed|ing)|waiting|open loops|what.*due/i.test(text)) {
         const b = await api<Board>("/api/board");
@@ -112,17 +113,27 @@ export default function Page() {
   // The browser drives the background work (serverless has no long-running loop):
   // poll known threads for replies every 10 s, and look for new CC'd asks every minute.
   useEffect(() => {
-    const run = (path: string) => async () => {
-      try {
-        await api(path, {});
-        await refresh();
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
-      }
+    // Each job skips a tick while its previous run is still going, so slow calls never pile up.
+    const job = (path: string, what: string) => {
+      let running = false;
+      return async () => {
+        if (running) return;
+        running = true;
+        try {
+          const r = await api<{ failed?: number }>(path, {});
+          await refresh();
+          if (r.failed) setError(`${r.failed} thread${r.failed === 1 ? "" : "s"} couldn't be read while ${what}; retrying automatically.`);
+        } catch (e) {
+          setError(e instanceof Error ? e.message : String(e));
+        } finally {
+          running = false;
+        }
+      };
     };
-    const sync = run("/api/sync");
-    sync();
-    const p = setInterval(run("/api/poll"), POLL_MS);
+    const poll = job("/api/poll", "checking for replies");
+    const sync = job("/api/sync", "looking for new asks");
+    poll().then(sync); // replies first, so a card is never offered for a nudge they already answered
+    const p = setInterval(poll, POLL_MS);
     const s = setInterval(sync, SYNC_MS);
     return () => {
       clearInterval(p);

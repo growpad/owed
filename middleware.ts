@@ -14,8 +14,13 @@ export function middleware(req: NextRequest) {
   if (!password) return NextResponse.next();
   const [scheme, encoded] = (req.headers.get("authorization") ?? "").split(" ");
   if (scheme === "Basic" && encoded) {
-    const decoded = atob(encoded);
-    if (safeEqual(decoded.slice(decoded.indexOf(":") + 1), password)) return NextResponse.next();
+    let decoded = "";
+    try {
+      decoded = atob(encoded);
+    } catch {
+      // malformed credentials: fall through to 401
+    }
+    if (decoded && safeEqual(decoded.slice(decoded.indexOf(":") + 1), password)) return NextResponse.next();
   }
   return new NextResponse("Authentication required", {
     status: 401,

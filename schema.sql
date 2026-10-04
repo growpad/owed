@@ -9,6 +9,8 @@ create table if not exists threads (
   last_from_me     boolean not null,
   last_msg_at      timestamptz not null,
   last_text        text,                      -- text of the last non-draft message, trimmed
+  last_their_at    timestamptz,               -- their latest real message (not ours, not automated)
+  last_their_text  text,
   body_tail        text,                      -- last 2-3 messages, plain text
   synced_at        timestamptz not null default now()
 );
@@ -19,6 +21,7 @@ create table if not exists loops (
   what_owed     text,
   open_question text,
   stakes_usd    numeric,
+  waiting_since timestamptz,                  -- our ask or last nudge. A later message from them means replied
   state         text not null default 'open', -- open|drafted|sent|replied|resolved|dismissed
   updated_at    timestamptz not null default now()
 );
@@ -31,6 +34,7 @@ create table if not exists follow_ups (
   gmail_message_id text,                      -- receipt after send
   status           text not null default 'draft', -- draft|sending|sent|discarded
   created_at       timestamptz not null default now(),
+  claimed_at       timestamptz,               -- when a send started. A stuck send can be retried after 30 s
   sent_at          timestamptz
 );
 
@@ -43,3 +47,10 @@ create table if not exists events (
 );
 
 create index if not exists events_loop_idx on events (loop_id, created_at desc);
+
+-- Upgrades for databases created before these columns existed. Safe to re-run.
+alter table threads add column if not exists last_their_at timestamptz;
+alter table threads add column if not exists last_their_text text;
+alter table loops add column if not exists waiting_since timestamptz;
+alter table follow_ups add column if not exists claimed_at timestamptz;
+update loops l set waiting_since = t.last_msg_at from threads t where t.id = l.thread_id and l.waiting_since is null;

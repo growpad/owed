@@ -2,6 +2,7 @@
 // your mailbox. It chases from its own address with you in CC, so the other
 // person's reply-all lands back in Owed's inbox and flips the card.
 // CC, not BCC: a BCC'd address is dropped from replies, so Owed would never see them.
+import { MailError } from "./mail";
 import type { MailPort, RawThread } from "./types";
 
 const BASE = "https://api.agentmail.to/v0";
@@ -37,7 +38,7 @@ export function realAgentMail(env: { apiKey: string; inbox: string; owners: stri
       await new Promise((r) => setTimeout(r, wait * 1000 * 2 ** attempt));
       return call<T>(path, init, attempt + 1);
     }
-    if (!res.ok) throw new Error(`AgentMail ${res.status}: ${(await res.text()).slice(0, 300)}`);
+    if (!res.ok) throw new MailError(res.status, `AgentMail ${res.status}: ${(await res.text()).slice(0, 300)}`);
     return res.status === 204 ? (undefined as T) : (res.json() as Promise<T>);
   }
 

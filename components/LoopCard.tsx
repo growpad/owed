@@ -50,18 +50,23 @@ export function LoopCard({ loop }: { loop: BoardRow }) {
     setErr(null);
     try {
       await fn();
-      await refresh();
-      if (history) await loadHistory();
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(null);
     }
+    // After success or failure, show the server's truth (a failed send may still have changed state).
+    await refresh();
+    if (history) await loadHistory();
   }
 
   async function loadHistory() {
-    const r = await api<{ events: Ev[] }>(`/api/events?loopId=${loop.id}`);
-    setHistory(r.events);
+    try {
+      const r = await api<{ events: Ev[] }>(`/api/events?loopId=${loop.id}`);
+      setHistory(r.events);
+    } catch (e) {
+      setErr(`Couldn't load history: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
 
   // Keep an open history panel live: a poll that flips the state also adds an event.
@@ -109,7 +114,7 @@ export function LoopCard({ loop }: { loop: BoardRow }) {
         {loop.state === "replied" && (
           <blockquote className="reply">
             <span>{name} replied</span>
-            {loop.last_text}
+            {loop.last_their_text ?? loop.last_text}
           </blockquote>
         )}
 
@@ -129,7 +134,7 @@ export function LoopCard({ loop }: { loop: BoardRow }) {
                   await api("/api/send", { followUpId: loop.follow_up_id });
                 })}
               >
-                {busy === "send" ? "Sending…" : "Send"}
+                {busy === "send" ? "Sending…" : loop.follow_up_status === "sending" ? "Finish sending" : "Send"}
               </button>
               {dirty && (
                 <button disabled={!!busy || !text.trim()} onClick={() => act("save", save)}>

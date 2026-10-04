@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { board, draft, editDraft, events, poll, send, setState, sync } from "@/lib/owed";
-import { buildReply, isAutomated, parseAddress, summarizeThread } from "@/lib/mail";
+import { buildReply, isAutomated, MailError, parseAddress, summarizeThread } from "@/lib/mail";
 import { uuid } from "@/lib/route";
 import { parseClassification } from "@/lib/llm";
 import { stripQuoted } from "@/lib/gmail";
@@ -20,7 +20,7 @@ const byThread = async (id: string) => (await board(deps)).find((l) => l.thread_
 describe("Owed end-to-end", () => {
   it("sync classifies 3 owed threads and ignores the thank-you note", async () => {
     const r = await sync(deps);
-    expect(r).toEqual({ threads: 4, classified: 4, owed: 3 });
+    expect(r).toEqual({ threads: 4, classified: 4, owed: 3, failed: 0 });
     const loops = await board(deps);
     expect(loops.map((l) => l.thread_id).sort()).toEqual(["t-deposit", "t-pilot", "t-refund"]);
     expect(loops.every((l) => l.is_stalled && l.last_from_me)).toBe(true);
@@ -106,7 +106,7 @@ describe("Owed end-to-end", () => {
   it("threads where they already replied are not classified", async () => {
     gmail.reply("t-thanks", "Anytime!");
     const r = await sync(deps);
-    expect(r).toEqual({ threads: 4, classified: 3, owed: 3 });
+    expect(r).toEqual({ threads: 4, classified: 3, owed: 3, failed: 0 });
   });
 
   it("a reply before any nudge still flips the card", async () => {
@@ -160,15 +160,96 @@ describe("Owed end-to-end", () => {
     expect(sent).toHaveLength(2); // the original ask + exactly one nudge
   });
 
-  it("a failed send releases the claim so the user can retry", async () => {
+  const followUp = async (id: string) => (await deps.sql(`select status, gmail_message_id from follow_ups where id = $1`, [id]))[0];
+  const age = (id: string) => deps.sql(`update follow_ups set claimed_at = now() - interval '1 minute' where id = $1`, [id]);
+
+  it("a rejected send is released so the user can retry", async () => {
     await sync(deps);
     const d = await draft(deps, (await byThread("t-refund")).id);
     const real = gmail.sendDraft.bind(gmail);
-    gmail.sendDraft = async () => { throw new Error("network down"); };
-    await expect(send(deps, d.followUpId)).rejects.toThrow(/network/);
-    expect((await deps.sql(`select status from follow_ups where id = $1`, [d.followUpId]))[0].status).toBe("draft");
+    gmail.sendDraft = async () => { throw new MailError(400, "bad recipient"); };
+    await expect(send(deps, d.followUpId)).rejects.toThrow(/bad recipient/);
+    expect((await followUp(d.followUpId)).status).toBe("draft");
     gmail.sendDraft = real;
     await expect(send(deps, d.followUpId)).resolves.toHaveProperty("messageId");
+  });
+
+  it("a send that timed out after going out is recorded on retry, never sent twice", async () => {
+    await sync(deps);
+    const d = await draft(deps, (await byThread("t-refund")).id);
+    const real = gmail.sendDraft.bind(gmail);
+    gmail.sendDraft = async (id) => { await real(id); throw new MailError(null, "timeout"); }; // it went out
+    await expect(send(deps, d.followUpId)).rejects.toThrow(/couldn't confirm/);
+    expect((await followUp(d.followUpId)).status).toBe("sending");
+    await expect(send(deps, d.followUpId)).rejects.toThrow(/in progress/); // too soon to retry
+    gmail.sendDraft = real;
+    await age(d.followUpId);
+    await send(deps, d.followUpId); // the draft is gone, so this records instead of sending
+    expect((await followUp(d.followUpId)).status).toBe("sent");
+    const nudges = gmail.threads.get("t-refund")!.filter((m) => m.labelIds.includes("SENT")).length;
+    expect(nudges).toBe(2); // the ask + exactly one nudge
+    expect((await byThread("t-refund")).state).toBe("sent");
+  });
+
+  it("a send that timed out before going out sends on retry", async () => {
+    await sync(deps);
+    const d = await draft(deps, (await byThread("t-refund")).id);
+    const real = gmail.sendDraft.bind(gmail);
+    gmail.sendDraft = async () => { throw new MailError(null, "timeout"); }; // it did not go out
+    await expect(send(deps, d.followUpId)).rejects.toThrow(/couldn't confirm/);
+    gmail.sendDraft = real;
+    await age(d.followUpId);
+    const { messageId } = await send(deps, d.followUpId);
+    expect(messageId).toBeTruthy();
+    expect(gmail.threads.get("t-refund")!.filter((m) => m.labelIds.includes("SENT"))).toHaveLength(2);
+  });
+
+  it("a draft deleted from the mailbox is discarded, not sent", async () => {
+    await sync(deps);
+    const d = await draft(deps, (await byThread("t-refund")).id);
+    const [{ gmail_draft_id }] = await deps.sql(`select gmail_draft_id from follow_ups where id = $1`, [d.followUpId]);
+    await gmail.deleteDraft(gmail_draft_id);
+    await expect(send(deps, d.followUpId)).rejects.toThrow(/Redraft/);
+    expect((await followUp(d.followUpId)).status).toBe("discarded");
+  });
+
+  it("no nudge goes out once they replied, even if the card is stale", async () => {
+    await sync(deps);
+    const loop = await byThread("t-deposit");
+    const d = await draft(deps, loop.id);
+    gmail.reply("t-deposit", "Sent it this morning."); // no poll has seen this yet
+    await expect(send(deps, d.followUpId)).rejects.toThrow(/already replied/);
+    expect(gmail.threads.get("t-deposit")!.filter((m) => m.labelIds.includes("SENT"))).toHaveLength(1);
+    expect((await poll(deps)).replied).toEqual([loop.id]);
+  });
+
+  it("a reply counts even when we spoke again after it", async () => {
+    await sync(deps);
+    const loop = await byThread("t-pilot");
+    await send(deps, (await draft(deps, loop.id)).followUpId);
+    gmail.reply("t-pilot", "Approved, sending the PO.");
+    gmail.addOutgoing("t-pilot", "Dana Kim <dana@acme.example>", "Re: Pilot proposal: support agent", "Thanks Dana!", Date.now() + 1000);
+    expect((await poll(deps)).replied).toEqual([loop.id]);
+    expect((await byThread("t-pilot")).last_their_text).toContain("Approved");
+  });
+
+  it("a draft that finishes after they replied keeps the reply and leaves no draft behind", async () => {
+    await sync(deps);
+    const loop = await byThread("t-deposit");
+    const slow = deps.llm.draft;
+    deps.llm = { ...deps.llm, draft: async (i) => { gmail.reply("t-deposit", "Paid!"); await poll(deps); return slow(i); } };
+    await expect(draft(deps, loop.id)).rejects.toThrow(/changed while drafting/);
+    expect((await byThread("t-deposit")).state).toBe("replied");
+    expect(gmail.drafts.size).toBe(0);
+  });
+
+  it("a classifier answer without a clear yes/no is retried, not dismissed", async () => {
+    const good = deps.llm.classify;
+    deps.llm = { ...deps.llm, classify: async () => parseClassification('{"owed": "maybe"}') };
+    await expect(sync(deps)).rejects.toThrow(/no boolean/); // every thread failed: reported, nothing dismissed
+    expect(await deps.sql(`select 1 from loops`)).toHaveLength(0);
+    deps.llm = { ...deps.llm, classify: good };
+    expect((await sync(deps)).owed).toBe(3); // retried on the next sync
   });
 
   it("redraft removes the replaced draft from the mailbox", async () => {
@@ -290,6 +371,18 @@ describe("helpers", () => {
     expect(isAutomated(m({ "auto-submitted": "auto-replied" }))).toBe(true);
     expect(isAutomated(m({ precedence: "bulk" }))).toBe(true);
     expect(isAutomated(m({ from: "MAILER-DAEMON@x.com" }))).toBe(true);
+  });
+
+  it("schema.sql survives the deploy script's statement split and re-runs cleanly", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { PGlite } = await import("@electric-sql/pglite");
+    // Same split as scripts/apply-schema.mjs: drop comment lines, split on ";".
+    const statements = readFileSync("schema.sql", "utf8")
+      .split("\n").filter((l) => !l.trim().startsWith("--")).join("\n")
+      .split(";").map((x) => x.trim()).filter(Boolean);
+    const db = new PGlite();
+    for (const round of [1, 2]) for (const st of statements) await db.query(st); // twice: upgrades must be idempotent
+    expect(statements.length).toBeGreaterThan(5);
   });
 
   it("validates ids at the API boundary", () => {

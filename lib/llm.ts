@@ -46,17 +46,22 @@ async function chat(messages: Msg[]): Promise<string> {
   const data = await res.json();
   const content = data?.choices?.[0]?.message?.content;
   // Some gateway models return an array of content blocks instead of a string.
-  if (Array.isArray(content)) return content.map((c: any) => c?.text ?? "").join("");
-  return String(content ?? "");
+  const text = Array.isArray(content) ? content.map((c: any) => c?.text ?? "").join("") : String(content ?? "");
+  // Refusals and length-capped reasoning come back empty: never let that become an email.
+  if (!text.trim()) throw new Error(`LLM returned no text (finish_reason: ${data?.choices?.[0]?.finish_reason ?? "unknown"})`);
+  return text;
 }
 
 export function parseClassification(text: string): Classification {
   const m = text.match(/\{[\s\S]*\}/);
   if (!m) throw new Error("no JSON in classifier output");
   const j = JSON.parse(m[0]);
+  // Anything but a clear yes/no is an error, not "not owed": the thread then gets no loop and is retried next sync.
+  const owedRaw = j.owed === "true" ? true : j.owed === "false" ? false : j.owed;
+  if (typeof owedRaw !== "boolean") throw new Error(`classifier gave no boolean "owed": ${m[0].slice(0, 120)}`);
   const stakes = typeof j.stakes_usd === "number" ? j.stakes_usd : Number(j.stakes_usd);
   return {
-    owed: j.owed === true || j.owed === "true",
+    owed: owedRaw,
     what_owed: j.what_owed ?? null,
     open_question: j.open_question ?? null,
     stakes_usd: Number.isFinite(stakes) && stakes > 0 ? stakes : null,

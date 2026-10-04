@@ -3,6 +3,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
+import { MailError } from "@/lib/mail";
 import type { Classification, DraftInput, DraftReply, MailPort, LlmPort, RawMessage, RawThread, Sql } from "@/lib/types";
 
 export const ME = "test.user@example.com";
@@ -43,12 +44,12 @@ export class TestMailbox implements MailPort {
     this.threads.set(threadId, list);
   }
 
-  /** The other person replies in the thread. */
-  reply(threadId: string, text: string) {
+  /** The other person replies in the thread, a moment after now (real replies never share our send's millisecond). */
+  reply(threadId: string, text: string, at = Date.now() + 1000) {
     const list = this.threads.get(threadId);
     if (!list) throw new Error("no thread");
     const first = list[0];
-    list.push(this.msg(["INBOX"], { from: first.headers["to"], to: ME, subject: `Re: ${first.headers["subject"]}` }, text, Date.now()));
+    list.push(this.msg(["INBOX"], { from: first.headers["to"], to: ME, subject: `Re: ${first.headers["subject"]}` }, text, at));
   }
 
   private msg(labelIds: string[], h: { from: string; to: string; subject: string }, text: string, at: number): RawMessage {
@@ -71,19 +72,19 @@ export class TestMailbox implements MailPort {
   }
   async updateDraft(draftId: string, { body }: DraftReply) {
     const d = this.drafts.get(draftId);
-    if (!d) throw new Error("draft not found");
+    if (!d) throw new MailError(404, "draft not found"); // like Gmail and AgentMail
     this.threads.get(d.threadId)!.find((m) => m.id === d.messageId)!.text = body;
   }
   async deleteDraft(draftId: string) {
     const d = this.drafts.get(draftId);
-    if (!d) throw new Error("draft not found");
+    if (!d) throw new MailError(404, "draft not found"); // like Gmail and AgentMail
     const list = this.threads.get(d.threadId)!;
     list.splice(list.findIndex((m) => m.id === d.messageId), 1);
     this.drafts.delete(draftId);
   }
   async sendDraft(draftId: string) {
     const d = this.drafts.get(draftId);
-    if (!d) throw new Error("draft not found");
+    if (!d) throw new MailError(404, "draft not found"); // like Gmail and AgentMail
     const list = this.threads.get(d.threadId)!;
     const i = list.findIndex((m) => m.id === d.messageId);
     // Like Gmail and AgentMail: sending deletes the draft and creates a new SENT message with a new id.

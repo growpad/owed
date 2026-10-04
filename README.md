@@ -26,7 +26,8 @@ assistant-ui chat ──> /api/board          │
 - **Stall detector is SQL**, not an LLM: you sent the last message, and it is older than `STALL_AFTER`.
 - **Drafts never reset the clock:** Gmail stores drafts as `DRAFT`-labelled messages in the thread; sync skips them.
 - **Memory:** every classify, draft, send and reply is a row in `events`; the drafter reads the last 10 before writing.
-- **Safety:** nothing sends without a click, and a click sends once (atomic claim, so double clicks and retries cannot duplicate). Optional `SEND_ALLOWLIST` and `SEND_BUDGET`. Email text is treated as data in both prompts. Bounces and auto-replies (RFC 3834) never count as a reply.
+- **Reply detection:** a card flips when any real message from them is newer than your ask or Owed's last nudge, so it still flips if you answer "thanks" after them. Bounces and auto-replies don't count.
+- **Safety:** nothing sends without a click, and a click sends once. Send re-reads the thread first and refuses if they already replied. A timed-out send is held, not released, and retrying it is safe: providers delete a draft once it is sent, so a retry either sends it or records that it already went. Optional `SEND_ALLOWLIST` and `SEND_BUDGET`. Email text is treated as data in both prompts. Bounces and auto-replies (RFC 3834) never count as a reply.
 - **Deploy safely:** set `APP_PASSWORD` and the whole app sits behind HTTP Basic Auth, since its API can send email.
 - **Resilience:** every outbound call has a timeout; AgentMail `429`s are retried with `Retry-After`.
 - **The chat is deterministic:** "What am I owed?" calls the board directly and renders live cards as an assistant-ui tool UI. The model is used where it adds value: classifying threads and writing drafts.
@@ -39,7 +40,7 @@ assistant-ui chat ──> /api/board          │
 3. `cp .env.example .env` and fill it in.
 4. ```bash
    npm install
-   npm run db:schema   # creates the 4 tables
+   npm run db:schema   # creates the 4 tables, and upgrades older ones in place
    npm run token       # gmail only: sign in, paste GOOGLE_REFRESH_TOKEN into .env
    npm run dev         # http://localhost:3000
    ```
@@ -60,7 +61,7 @@ Submission text, video script and judge Q&A: [DEMO.md](DEMO.md).
 ## Tests
 
 ```bash
-npm test   # end-to-end flow on in-memory Postgres (PGlite, real schema) with test doubles for mail and LLM (25 tests)
+npm test   # end-to-end flow on in-memory Postgres (PGlite, real schema) with test doubles for mail and LLM (33 tests)
 ```
 
 ## Files

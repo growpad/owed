@@ -70,9 +70,11 @@ export type BoardRow = {
   state: string;
   last_msg_at: string;
   last_text: string | null;
+  last_their_text: string | null;
   last_from_me: boolean;
   is_stalled: boolean;
   follow_up_id: string | null;
   follow_up_body: string | null;
+  follow_up_status: "draft" | "sending" | "sent" | null;
   receipt: string | null;
 };
