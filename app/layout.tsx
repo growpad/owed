@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
-import { Bricolage_Grotesque, Public_Sans } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 
-const display = Bricolage_Grotesque({ subsets: ["latin"], weight: ["600", "800"], variable: "--font-display" });
-const body = Public_Sans({ subsets: ["latin"], weight: ["400", "700"], variable: "--font-body" });
+// Self-hosted (SIL OFL, licenses in app/fonts) so builds never depend on a font download.
+const display = localFont({ src: "./fonts/bricolage-grotesque.woff2", weight: "600 800", variable: "--font-display" });
+const body = localFont({ src: "./fonts/public-sans.woff2", weight: "400 700", variable: "--font-body" });
 
 export const metadata: Metadata = {
   title: "Owed",

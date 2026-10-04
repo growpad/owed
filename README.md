@@ -13,17 +13,20 @@ Built at the Build Personal Agents Hack, Oct 4 2026, on **Neon** (Postgres + AI 
 ## How it works
 
 ```
-Gmail (sent mail) ──> /api/sync ──> Neon Postgres: threads, loops, follow_ups, events
-                         │                ▲
-                         └─ classify ─────┤  Neon AI Gateway (gpt-5-mini)
-assistant-ui chat ──> /api/board          │
-   "What am I owed?"   /api/draft ── draft ┘ ──> Gmail draft inside the thread
-                       /api/send  ──> drafts.send (only on click; message id = receipt)
-   browser every 10s ─> /api/poll ──> reply detected ──> card flips, event logged
+You ── ask, Owed in CC ──> AgentMail inbox (owed-agent@...)
+                               │
+browser every 60 s ─> /api/sync ─┴─> Neon Postgres: threads, loops, follow_ups, events
+                         │                 ▲
+                         └─ classify ──────┤  Neon AI Gateway (gpt-5-mini)
+assistant-ui chat ──> /api/board           │
+  "What am I owed?"   /api/draft ── draft ─┘ ──> AgentMail draft, reply in the thread, you in CC
+                      /api/edit   ──> your edits update that draft
+                      /api/send   ──> sent only on click; message id = receipt
+browser every 10 s ─> /api/poll   ──> their reply ──> card flips to "They replied", event logged
 ```
 
 - **You stay in charge of every card:** edit the draft before it goes (the mailbox draft is updated, so Send sends exactly what you see), mark a card resolved any time, or mark it "Not owed" if the model got it wrong.
-- **Stall detector is SQL**, not an LLM: you sent the last message, and it is older than `STALL_AFTER`.
+- **Stall detector is SQL**, not an LLM: your side spoke last, longer ago than `STALL_AFTER`.
 - **Drafts never reset the clock:** Gmail stores drafts as `DRAFT`-labelled messages in the thread; sync skips them.
 - **Memory:** every classify, draft, send and reply is a row in `events`; the drafter reads the last 10 before writing.
 - **Reply detection:** a card flips when any real message from them is newer than your ask or Owed's last nudge, so it still flips if you answer "thanks" after them. Bounces and auto-replies don't count.
