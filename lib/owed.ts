@@ -23,7 +23,8 @@ export async function sync(deps: Deps) {
   const ids = await deps.mail.listThreadIds(MAX_THREADS);
   let classified = 0;
   let owed = 0;
-  await Promise.all(
+  // One unreadable thread must not stop the others: settle each, log failures.
+  await settleAll(
     ids.map(async (id) => {
       const s = summarizeThread(await deps.mail.getThread(id), me);
       if (!s) return;
@@ -42,6 +43,7 @@ export async function sync(deps: Deps) {
         [id, c.what_owed, c.open_question, c.stakes_usd, c.owed ? "open" : "dismissed", JSON.stringify(c)],
       );
     }),
+    "sync",
   );
   return { threads: ids.length, classified, owed };
 }
@@ -119,6 +121,32 @@ export async function draft(deps: Deps, loopId: string) {
   return { followUpId: rows[0].follow_up_id as string, body };
 }
 
+export const MAX_BODY = 5000;
+
+/** User story 3: edit the draft before sending. The mailbox draft is updated too, so Send sends exactly this. */
+export async function editDraft(deps: Deps, followUpId: string, body: string) {
+  const text = body.trim();
+  if (!text) throw new HttpError(400, "the draft cannot be empty");
+  if (text.length > MAX_BODY) throw new HttpError(400, `the draft is over ${MAX_BODY} characters`);
+  const rows = await deps.sql(
+    `select f.status, f.gmail_draft_id, f.loop_id, t.id as thread_id, t.counterpart, t.subject, t.last_msg_id
+     from follow_ups f join loops l on l.id = f.loop_id join threads t on t.id = l.thread_id where f.id = $1`,
+    [followUpId],
+  );
+  if (rows.length === 0) throw new HttpError(404, "follow-up not found");
+  const f = rows[0];
+  if (f.status !== "draft") throw new HttpError(409, `follow-up is ${f.status}`);
+  await deps.mail.updateDraft(f.gmail_draft_id, {
+    threadId: f.thread_id, to: f.counterpart, subject: f.subject, inReplyTo: f.last_msg_id, body: text,
+  });
+  await deps.sql(
+    `with u as (update follow_ups set body = $2 where id = $1 and status = 'draft' returning loop_id)
+     insert into events (loop_id, type, payload) select loop_id, 'edited', jsonb_build_object('follow_up_id', $1::text) from u`,
+    [followUpId, text],
+  );
+  return { body: text };
+}
+
 /** F7: send only on an explicit call; Gmail deletes the draft and returns a new SENT message id. */
 export async function send(deps: Deps, followUpId: string) {
   const budget = Number(process.env.SEND_BUDGET);
@@ -160,11 +188,12 @@ export async function send(deps: Deps, followUpId: string) {
 export async function poll(deps: Deps) {
   const me = await deps.mail.myAddresses();
   const waiting = await deps.sql(`select thread_id from loops where state in ('open','drafted','sent')`);
-  await Promise.all(
+  await settleAll(
     waiting.map(async (w) => {
       const s = summarizeThread(await deps.mail.getThread(w.thread_id), me);
       if (s) await upsertThread(deps, s);
     }),
+    "poll",
   );
   const replied = await deps.sql(
     `with r as (
@@ -189,12 +218,20 @@ export async function poll(deps: Deps) {
   return { checked: waiting.length, replied: replied.map((r) => r.loop_id as string) };
 }
 
+/** Resolved: you got what you were owed. Dismissed: the classifier was wrong, nothing was owed. */
 export async function setState(deps: Deps, loopId: string, state: "resolved" | "dismissed") {
   await deps.sql(
     `with l as (update loops set state = $2, updated_at = now() where id = $1 returning id)
      insert into events (loop_id, type) select id, $2 from l`,
     [loopId, state],
   );
+}
+
+async function settleAll(work: Promise<unknown>[], label: string) {
+  const failed = (await Promise.allSettled(work)).filter((r): r is PromiseRejectedResult => r.status === "rejected");
+  for (const f of failed) console.error(`[owed] ${label}:`, f.reason instanceof Error ? f.reason.message : f.reason);
+  // Everything failing means something global is wrong (auth, network): surface it.
+  if (failed.length > 0 && failed.length === work.length) throw failed[0].reason;
 }
 
 export class HttpError extends Error {

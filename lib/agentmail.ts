@@ -85,6 +85,9 @@ export function realAgentMail(env: { apiKey: string; inbox: string; owners: stri
       });
       return r.draft_id;
     },
+    async updateDraft(draftId, { body }) {
+      await call(`/drafts/${encodeURIComponent(draftId)}`, { method: "PATCH", body: JSON.stringify({ text: body }) });
+    },
     async deleteDraft(draftId) {
       await call(`/drafts/${encodeURIComponent(draftId)}`, { method: "DELETE" });
     },

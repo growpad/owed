@@ -69,6 +69,11 @@ export class TestMailbox implements MailPort {
     this.drafts.set(draftId, { threadId, messageId: m.id });
     return draftId;
   }
+  async updateDraft(draftId: string, { body }: DraftReply) {
+    const d = this.drafts.get(draftId);
+    if (!d) throw new Error("draft not found");
+    this.threads.get(d.threadId)!.find((m) => m.id === d.messageId)!.text = body;
+  }
   async deleteDraft(draftId: string) {
     const d = this.drafts.get(draftId);
     if (!d) throw new Error("draft not found");

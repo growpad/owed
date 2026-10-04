@@ -22,6 +22,7 @@ assistant-ui chat ──> /api/board          │
    browser every 10s ─> /api/poll ──> reply detected ──> card flips, event logged
 ```
 
+- **You stay in charge of every card:** edit the draft before it goes (the mailbox draft is updated, so Send sends exactly what you see), mark a card resolved any time, or mark it "Not owed" if the model got it wrong.
 - **Stall detector is SQL**, not an LLM: you sent the last message, and it is older than `STALL_AFTER`.
 - **Drafts never reset the clock:** Gmail stores drafts as `DRAFT`-labelled messages in the thread; sync skips them.
 - **Memory:** every classify, draft, send and reply is a row in `events`; the drafter reads the last 10 before writing.
@@ -50,7 +51,7 @@ No gateway access? Set `LLM_BASE_URL=https://api.openai.com/v1` and `LLM_API_KEY
 
 1. From your own email, send 3 asks that need an answer (deposit, refund, proposal) and one thank-you note, each with Owed's inbox in **CC**. Do not reply yet.
 2. Set `STALL_AFTER=20 minutes` (the UI shows a "Demo clock" label; real use is `5 days`).
-3. After 20 minutes: "Sync my inbox", then "What am I owed?". Draft, Send (Owed sends it with you in CC), then reply-all from the other account. The card flips within about 10 seconds.
+3. After 20 minutes, ask "What am I owed?" (new CC'd asks are picked up every minute; "Check my mail" does it now). Draft, edit if you like, Send (Owed sends it with you in CC), then reply-all from the other account. The card flips within about 10 seconds.
 
 ## Demo kit
 
@@ -59,7 +60,7 @@ Submission text, video script and judge Q&A: [DEMO.md](DEMO.md).
 ## Tests
 
 ```bash
-npm test   # end-to-end flow on in-memory Postgres (PGlite, real schema) with test doubles for mail and LLM (21 tests)
+npm test   # end-to-end flow on in-memory Postgres (PGlite, real schema) with test doubles for mail and LLM (25 tests)
 ```
 
 ## Files

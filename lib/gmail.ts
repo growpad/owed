@@ -66,6 +66,10 @@ export function realGmail(env: { clientId: string; clientSecret: string; refresh
       const res = await api.users.drafts.create({ userId: "me", requestBody: { message: { raw, threadId } } });
       return res.data.id!;
     },
+    async updateDraft(draftId, { threadId, ...reply }) {
+      const [from] = await this.myAddresses();
+      await api.users.drafts.update({ userId: "me", id: draftId, requestBody: { message: { raw: buildReply({ from, ...reply }), threadId } } });
+    },
     async deleteDraft(draftId) {
       await api.users.drafts.delete({ userId: "me", id: draftId });
     },

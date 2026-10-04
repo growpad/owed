@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { board, draft, events, poll, send, setState, sync } from "@/lib/owed";
+import { board, draft, editDraft, events, poll, send, setState, sync } from "@/lib/owed";
 import { buildReply, isAutomated, parseAddress, summarizeThread } from "@/lib/mail";
 import { uuid } from "@/lib/route";
 import { parseClassification } from "@/lib/llm";
@@ -178,6 +178,50 @@ describe("Owed end-to-end", () => {
     await draft(deps, loop.id);
     expect(gmail.drafts.size).toBe(1);
     expect(gmail.threads.get("t-deposit")!.filter((m) => m.labelIds.includes("DRAFT"))).toHaveLength(1);
+  });
+
+  it("an edited draft is what gets sent", async () => {
+    await sync(deps);
+    const loop = await byThread("t-deposit");
+    const d = await draft(deps, loop.id);
+    await editDraft(deps, d.followUpId, "  Hi Sam, could you send the $1,800 by Friday?  ");
+    expect((await byThread("t-deposit")).follow_up_body).toBe("Hi Sam, could you send the $1,800 by Friday?");
+    const { messageId } = await send(deps, d.followUpId);
+    const sent = gmail.threads.get("t-deposit")!.find((m) => m.id === messageId)!;
+    expect(sent.text).toBe("Hi Sam, could you send the $1,800 by Friday?");
+    expect((await events(deps, loop.id)).map((e) => e.type)).toContain("edited");
+    await expect(editDraft(deps, d.followUpId, "too late")).rejects.toThrow(/sent/);
+  });
+
+  it("an empty edit is refused", async () => {
+    await sync(deps);
+    const d = await draft(deps, (await byThread("t-refund")).id);
+    await expect(editDraft(deps, d.followUpId, "   ")).rejects.toThrow(/empty/);
+  });
+
+  it("not owed and resolved both clear the card, and are logged", async () => {
+    await sync(deps);
+    const a = await byThread("t-refund");
+    const b = await byThread("t-pilot");
+    await setState(deps, a.id, "dismissed");
+    await setState(deps, b.id, "resolved");
+    expect((await board(deps)).map((l) => l.thread_id)).toEqual(["t-deposit"]);
+    expect((await events(deps, a.id))[0].type).toBe("dismissed");
+    // a later sync does not resurrect a dismissed thread
+    await sync(deps);
+    expect((await board(deps)).map((l) => l.thread_id)).toEqual(["t-deposit"]);
+  });
+
+  it("one unreadable thread does not stop reply detection for the others", async () => {
+    await sync(deps);
+    const a = await byThread("t-deposit");
+    const b = await byThread("t-pilot");
+    await send(deps, (await draft(deps, a.id)).followUpId);
+    await send(deps, (await draft(deps, b.id)).followUpId);
+    gmail.reply("t-pilot", "Yes, approved.");
+    const real = gmail.getThread.bind(gmail);
+    gmail.getThread = async (id) => { if (id === "t-deposit") throw new Error("404"); return real(id); };
+    expect((await poll(deps)).replied).toEqual([b.id]);
   });
 
   it("drafting a replied loop is refused", async () => {

@@ -22,11 +22,11 @@
 ## Video script (target 2:30, cap 3:00)
 
 1. **0:00–0:15 Hook.** "You asked for your deposit back three weeks ago. Silence. Owed is the assistant you CC. It remembers what people owe you, and gets it back."
-2. **0:15–0:40 Find.** Show one seed email with Owed in CC. In the app: "Sync my inbox", then "What am I owed?". Three cards, ranked by stakes: $12k proposal, $1,800 deposit, $240 refund. The thank-you note is not there. Say: "Demo clock: 5 days runs as 20 minutes."
-3. **0:40–1:10 Draft.** Draft follow-up on the deposit card. Read it: it cites the move-out date and the amount, asks one question, and is signed "Owed, assistant to Joydip". Owed never read the inbox; it only saw what was CC'd.
+2. **0:15–0:40 Find.** Show one seed email with Owed in CC (the address is in the app header, with a Copy button). In the app, ask "What am I owed?". New CC'd asks are picked up on their own every minute; "Check my mail" does it now. Three cards, ranked by stakes: $12k proposal, $1,800 deposit, $240 refund. The thank-you note is not there. Say: "Demo clock: 5 days runs as 20 minutes."
+3. **0:40–1:10 Draft.** Draft follow-up on the deposit card. Read it: it cites the move-out date and the amount, asks one question, and is signed "Owed, assistant to Joydip". Change one word in the draft to show it is yours to edit. Owed never read the inbox; it only saw what was CC'd.
 4. **1:10–1:30 Send.** Click Send. The card shows the receipt id. Show the email arriving on the phone, from Owed, with you in CC.
-5. **1:30–1:55 Reply flip.** Reply-all from the phone on camera. Within about 10 seconds the card flips to "They replied" with their text.
-6. **1:55–2:15 Memory.** Open History on the card, then the `events` table in the Neon console: classified, flagged, drafted, sent, reply received. The drafter reads these before every draft.
+5. **1:30–1:55 Reply flip.** Reply-all from the phone on camera. Within about 10 seconds the card turns green, shows their reply, and gets stamped "Settled".
+6. **1:55–2:15 Memory.** Open History on the card, then the `events` table in the Neon console: spotted the ask, went quiet, drafted, edited, sent, they replied. The drafter reads these before every draft.
 7. **2:15–2:30 Close.** "Neon Postgres and AI Gateway, assistant-ui, AgentMail, and an open repo reviewed by CodeRabbit. The full product is Operator Brief."
 
 Recording: screen and voiceover, 1080p. One rehearsal take, then the real one on the spare seed.
