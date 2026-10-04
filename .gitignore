@@ -6,3 +6,6 @@ node_modules
 next-env.d.ts
 .neon
 .playwright-mcp
+.vercel
+.env*
+!.env.example
