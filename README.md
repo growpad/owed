@@ -44,7 +44,7 @@ assistant-ui chat ──> /api/board          │
    npm run token       # gmail only: sign in, paste GOOGLE_REFRESH_TOKEN into .env
    npm run dev         # http://localhost:3000
    ```
-5. **Deploy:** import the repo on [vercel.com/new](https://vercel.com/new), add the same env vars plus `APP_PASSWORD`. Functions run in `cle1` (`vercel.json`), next to Neon's us-east-2.
+5. **Deploy:** on [vercel.com/new](https://vercel.com/new), import the repo, open *Environment Variables*, and paste your whole `.env` in one go (the same file you run locally). `vercel.json` sets the framework, `npm ci`, and the `cle1` region next to Neon's us-east-2. Deploy. The app asks for `APP_PASSWORD` (any username).
 
 No gateway access? Set `LLM_BASE_URL=https://api.openai.com/v1` and `LLM_API_KEY` instead.
 
