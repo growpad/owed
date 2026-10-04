@@ -4,7 +4,7 @@
 
 - **Title:** Owed, the assistant you CC that remembers what people owe you
 - **One-liner:** CC Owed on any ask. When they go quiet, it drafts the follow-up, sends it for you on one click, and closes the loop when they reply.
-- **Built with:** Neon Postgres (state and agent memory), Neon AI Gateway (every model call), assistant-ui (the whole interface), AgentMail (Owed's own inbox), CodeRabbit (reviews on the public repo).
+- **Built with:** Neon Postgres (state and agent memory), Neon AI Gateway (every model call), assistant-ui (the whole interface), AgentMail (Owed's own inbox).
 - **Links:** live URL · public repo · demo video (3 minutes or less)
 
 ## Before recording
@@ -27,7 +27,7 @@
 4. **1:10–1:30 Send.** Click Send. The card shows the receipt id. Show the email arriving on the phone, from Owed, with you in CC.
 5. **1:30–1:55 Reply flip.** Reply-all from the phone on camera. Within about 10 seconds the card turns green, shows their reply, and gets stamped "Settled".
 6. **1:55–2:15 Memory.** Open History on the card, then the `events` table in the Neon console: spotted the ask, went quiet, drafted, edited, sent, they replied. The drafter reads these before every draft.
-7. **2:15–2:30 Close.** "Neon Postgres and AI Gateway, assistant-ui, AgentMail, and an open repo reviewed by CodeRabbit. The full product is Operator Brief."
+7. **2:15–2:30 Close.** "Built on Neon Postgres and AI Gateway, assistant-ui and AgentMail, in an open repo. The full product is Operator Brief."
 
 Recording: screen and voiceover, 1080p. One rehearsal take, then the real one on the spare seed.
 
